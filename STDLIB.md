@@ -282,3 +282,18 @@ for.
   third-party requests. Committing a large PNG would work too, but the SVG
   costs real parse and raster time rather than only download time, which is a
   better demonstration of what LCP measures.
+
+## Reproducible build
+
+- **`goreleaser` / `ko` / a build script that stamps a version** → four flags on
+  `go build`, and deliberately no stamping at all: `-trimpath`,
+  `-buildvcs=false`, `-ldflags="-s -w -buildid="`. The interesting one is
+  `-buildvcs=false`. Since Go 1.18 the toolchain writes `vcs.revision`,
+  `vcs.time`, and a module pseudo-version into any binary built inside a git
+  repository, so a build that looks reproducible produces a different hash on
+  every commit. We shipped that mistake first and the README claimed a property
+  the binary did not have; `go version -m` now shows no `vcs.*` entries.
+  `goreleaser` is genuinely better at everything a release actually needs:
+  cross-compilation matrices, checksums, signing, changelogs, and publishing. We
+  need one binary and one property, and that property is now verified by CI on
+  every push rather than asserted in a README.

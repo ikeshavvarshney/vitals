@@ -20,7 +20,7 @@ all: build
 
 ## build: compile the single binary
 build:
-	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildid=" -o $(BIN) ./cmd/vitals
+	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o $(BIN) ./cmd/vitals
 
 ## run: build, then serve the dashboard and demo site on :8080
 run: build
@@ -68,8 +68,8 @@ proof:
 
 ## repro: build twice and print both SHA-256 hashes
 repro:
-	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildid=" -o vitals.repro1 ./cmd/vitals
-	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildid=" -o vitals.repro2 ./cmd/vitals
+	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o vitals.repro1 ./cmd/vitals
+	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o vitals.repro2 ./cmd/vitals
 	@go run ./tools/sha256sum vitals.repro1 vitals.repro2
 
 ## clean: remove build output

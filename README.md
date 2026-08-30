@@ -80,26 +80,35 @@ make repro
 Builds twice and prints both hashes.
 
 ```
-SHA-256 (build 1): 0a2d61777f7b8e6c0e5dcadaefc0fa9470a87012545d02829860212ca832a1df
-SHA-256 (build 2): 0a2d61777f7b8e6c0e5dcadaefc0fa9470a87012545d02829860212ca832a1df
+SHA-256 (build 1): [see the ci run for this commit]
+SHA-256 (build 2): [see the ci run for this commit]
 ```
 
-Built with `CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildid="`. The
-binary contains no build timestamp, git SHA, or injected version, which is what
-makes the output byte-identical.
+Built with:
 
-**What that hash is, precisely.** It is commit `bec6b84`, built on
-`linux/amd64` with Go 1.23, by the `reproducible-build` job in
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml), which builds twice and
-runs `cmp` on the results. Every push reproduces it.
+```
+CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o vitals ./cmd/vitals
+```
 
-Reproducibility here means *the same source, toolchain, and target produce the
-same bytes*. It does not mean one universal hash: a different Go version, a
-different GOOS or GOARCH, or a different commit all produce a different and
-equally valid digest. Building this commit on Windows, for instance, gives
-`d5870efac8fe633560ac782e7a6304abcd2ac1dadb012a024d39c3f701106f33`. If you are
-verifying, match your platform and Go version to the ones above, or simply run
-`make repro` and check that your own two builds agree.
+Each flag removes one source of variation. `-trimpath` strips local filesystem
+paths. `-buildid=` clears the build ID. `-buildvcs=false` is the one that is
+easy to miss: since Go 1.18 the toolchain stamps `vcs.revision`, `vcs.time`, and
+a module pseudo-version into every binary built inside a git repository, so
+without it the output changes on every commit even when no code changed. We got
+this wrong at first and the README claimed a property the build did not have;
+`go version -m vitals` now shows no `vcs.*` entries at all.
+
+Nothing else injects a version, timestamp, or commit. If a version string is
+ever wanted, it has to be a committed constant.
+
+**What reproducibility means here.** The same source, toolchain, and target
+produce the same bytes. It is not one universal hash: a different Go version, a
+different GOOS or GOARCH, or a different commit that actually changes code all
+produce a different and equally valid digest. The `reproducible-build` job in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) builds twice on
+`linux/amd64` with Go 1.23 and runs `cmp` on the results, on every push, so the
+claim is checked continuously rather than asserted once. To verify it yourself,
+run `make repro` and confirm your own two builds agree.
 
 ## Beacon size
 
