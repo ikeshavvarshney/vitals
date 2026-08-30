@@ -139,6 +139,36 @@
     </div>
   </section>
 
+  <section aria-labelledby="export-heading">
+    <div class="section-head">
+      <h2 id="export-heading">Take the numbers elsewhere</h2>
+      <p class="section-note">Every metric in the selected window, not just the one charted</p>
+    </div>
+    <div class="panel export">
+      <div class="export-actions">
+        <button type="button" id="copy-json">Copy report JSON</button>
+        <button type="button" id="download-json">Download JSON</button>
+        <button type="button" id="copy-prompt">Copy prompt for an AI agent</button>
+        <a class="export-raw" id="open-json" href="/api/report" target="_blank" rel="noopener">Open the endpoint</a>
+      </div>
+      <p class="export-status" id="export-status" role="status" aria-live="polite"></p>
+      <p class="export-lead">
+        The JSON holds p50, p75, p90 and p95 per metric, exact good /
+        needs-improvement / poor counts, the five worst routes and device
+        classes for each metric, and the ingest counters. The prompt wraps the
+        same figures in the context an agent needs to suggest fixes, including
+        what these numbers are not.
+      </p>
+      <details class="export-preview">
+        <summary>Preview what gets copied</summary>
+        <label class="visually-hidden" for="export-text">Copied text</label>
+        <textarea id="export-text" readonly rows="14" spellcheck="false"></textarea>
+        <p class="export-hint">If the clipboard is unavailable, the text appears
+        here instead. Select it and copy manually.</p>
+      </details>
+    </div>
+  </section>
+
   <footer class="notes">
     <h2>Reading these numbers</h2>
     <p><strong>Percentiles are approximate.</strong> Values are bucketed rather

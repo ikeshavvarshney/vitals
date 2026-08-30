@@ -173,3 +173,24 @@ func TestChartsUseInlineSVG(t *testing.T) {
 		}
 	}
 }
+
+// TestExportControlsAreWired guards the ids the export section shares between
+// the markup and the script. A rename in one file alone leaves a dead button
+// that fails silently in the browser.
+func TestExportControlsAreWired(t *testing.T) {
+	html := assetBody(t, "/index.html")
+	js := assetBody(t, "/dash.js")
+
+	for _, id := range []string{"copy-json", "download-json", "copy-prompt", "export-status", "export-text"} {
+		if !strings.Contains(html, `id="`+id+`"`) {
+			t.Errorf("index.html has no element with id %q", id)
+		}
+		if !strings.Contains(js, `'`+id+`'`) {
+			t.Errorf("dash.js never looks up id %q", id)
+		}
+	}
+
+	if !strings.Contains(js, "/api/report") {
+		t.Error("dash.js does not read /api/report; the export must not restitch the on-screen figures")
+	}
+}

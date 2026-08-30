@@ -264,6 +264,21 @@ for.
   handling, request cancellation, and consistent error shapes; the four calls
   here share one eight-line wrapper instead.
 
+- **`clipboard.js`** → `navigator.clipboard.writeText`, with the copied text
+  written into a `<textarea>` first so a refusal has somewhere to fall back to.
+  `clipboard.js` exists because `document.execCommand('copy')` needed a
+  selected node and a user gesture on browsers we no longer target, and it
+  still handles those, plus copy-from-attribute and cut. The async clipboard
+  API covers what this needs in one call; it is unavailable outside a secure
+  context, and localhost counts as one.
+
+- **`file-saver`** → `URL.createObjectURL` over a `Blob`, a synthesised `<a
+  download>`, and a `revokeObjectURL` on a timer. `file-saver` is better on the
+  cases it was written for: Safari's missing `download` support, IE's
+  `msSaveBlob`, and files large enough to need a filesystem writer. A report
+  measured in kilobytes, saved from a dashboard the developer is running
+  locally, does not reach any of them.
+
 ## Demo site
 
 - **A templating engine (`handlebars`, `ejs`, `html/template`)** → a small

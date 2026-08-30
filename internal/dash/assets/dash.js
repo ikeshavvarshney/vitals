@@ -21,7 +21,13 @@
     windowSel: document.getElementById('window'),
     metricGroup: document.getElementById('metric-group'),
     refresh: document.getElementById('refresh'),
-    snapLink: document.getElementById('snap-link')
+    snapLink: document.getElementById('snap-link'),
+    copyJSON: document.getElementById('copy-json'),
+    downloadJSON: document.getElementById('download-json'),
+    copyPrompt: document.getElementById('copy-prompt'),
+    exportStatus: document.getElementById('export-status'),
+    exportText: document.getElementById('export-text'),
+    exportPreview: document.querySelector('.export-preview')
   };
 
   var METRICS = [
@@ -583,6 +589,178 @@
     });
   }
 
+  // ---------------------------------------------------------------- export
+
+  // The report endpoint answers for all five metrics at once, so the export is
+  // a separate request rather than a stitching together of what is on screen.
+  function fetchReport() {
+    return getJSON('/api/report?from=' + encodeURIComponent(el.windowSel.value));
+  }
+
+  function exportStatus(text, state) {
+    el.exportStatus.textContent = text;
+    if (state) el.exportStatus.setAttribute('data-state', state);
+    else el.exportStatus.removeAttribute('data-state');
+  }
+
+  // showText fills the preview so the copied text is always inspectable, and
+  // so there is somewhere to fall back to when the clipboard is unavailable.
+  function showText(text, open) {
+    el.exportText.value = text;
+    if (open) el.exportPreview.open = true;
+  }
+
+  // copyText writes to the clipboard. The API is unavailable over plain HTTP on
+  // anything but localhost, and can be refused outright, so a failure opens the
+  // preview for a manual copy rather than reporting success it did not achieve.
+  function copyText(text, label) {
+    showText(text, false);
+
+    var writer = navigator.clipboard && navigator.clipboard.writeText
+      ? navigator.clipboard.writeText(text)
+      : Promise.reject(new Error('clipboard unavailable'));
+
+    writer.then(function () {
+      exportStatus(label + ' copied, ' + text.length.toLocaleString() + ' characters');
+    }).catch(function () {
+      showText(text, true);
+      el.exportText.focus();
+      el.exportText.select();
+      exportStatus('Clipboard refused. The text is selected below; copy it manually.', 'error');
+    });
+  }
+
+  function copyJSON() {
+    exportStatus('Building report');
+    fetchReport().then(function (report) {
+      copyText(JSON.stringify(report, null, 2), 'Report JSON');
+    }).catch(function (err) {
+      exportStatus(err.message || 'Request failed', 'error');
+    });
+  }
+
+  function downloadJSON() {
+    exportStatus('Building report');
+    fetchReport().then(function (report) {
+      var text = JSON.stringify(report, null, 2);
+      var url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+      var name = 'vitals-' + report.generated.slice(0, 19).replace(/[:T]/g, '') + '.json';
+
+      var a = h('a', { href: url, download: name });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Revoking immediately can race the download in some browsers.
+      setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+
+      showText(text, false);
+      exportStatus('Saved as ' + name);
+    }).catch(function (err) {
+      exportStatus(err.message || 'Request failed', 'error');
+    });
+  }
+
+  function copyPrompt() {
+    exportStatus('Building prompt');
+    fetchReport().then(function (report) {
+      copyText(buildPrompt(report), 'Prompt');
+    }).catch(function (err) {
+      exportStatus(err.message || 'Request failed', 'error');
+    });
+  }
+
+  // reading renders one value the way the prompt should carry it: a number with
+  // its unit, or an explicit marker that nothing was measured.
+  function reading(v, unit) {
+    if (v === null || v === undefined) return 'not measured';
+    return formatValue(v, unit) + unitLabel(v, unit);
+  }
+
+  function rowsLine(rows, unit) {
+    if (!rows || !rows.length) return 'none';
+    return rows.map(function (r) {
+      return r.key + ' ' + reading(r.p75, unit) + ' (n=' + r.samples + ')';
+    }).join(', ');
+  }
+
+  // buildPrompt turns a report into text an agent can act on. It states what the
+  // numbers are, what they are not, and what answer is wanted; a bare dump of
+  // figures gets a bare guess back.
+  function buildPrompt(report) {
+    var lines = [];
+
+    lines.push('You are a web performance engineer. Below is Core Web Vitals field data');
+    lines.push('from real page views of my site, collected by vitals, a self-hosted RUM tool.');
+    lines.push('Tell me what to fix and in what order.');
+    lines.push('');
+    lines.push('## Window');
+    lines.push(report.from + ' to ' + report.to + ' (' +
+      Math.round(report.windowHours) + 'h), ' + report.pageViews + ' page views.');
+    lines.push('Headline figures are the ' + Math.round(report.headlinePercentile * 100) +
+      'th percentile, which is what Core Web Vitals is assessed on.');
+    lines.push('');
+    lines.push('## Metrics');
+
+    report.metrics.forEach(function (m) {
+      var unit = m.unit;
+      lines.push('');
+      lines.push('### ' + m.metric.toUpperCase() + ' - ' + m.name);
+
+      if (!m.samples) {
+        lines.push('No samples in this window. Absent, not fast.');
+        return;
+      }
+
+      var q = m.quantiles || {};
+      lines.push('p50 ' + reading(q.p50, unit) +
+        ' | p75 ' + reading(q.p75, unit) +
+        ' | p90 ' + reading(q.p90, unit) +
+        ' | p95 ' + reading(q.p95, unit) +
+        ' | worst ' + reading(m.max, unit));
+      lines.push('Rating at p75: ' + (m.band || 'unknown') +
+        '. Good is at or below ' + reading(m.good, unit) +
+        ', poor is above ' + reading(m.needsImprovement, unit) + '.');
+
+      var d = m.distribution;
+      var pct = function (n) { return Math.round((n / m.samples) * 100) + '%'; };
+      lines.push('Of ' + m.samples + ' samples: ' +
+        d.good + ' good (' + pct(d.good) + '), ' +
+        d.needsImprovement + ' needs improvement (' + pct(d.needsImprovement) + '), ' +
+        d.poor + ' poor (' + pct(d.poor) + '). These counts are exact.');
+      lines.push('Worst routes: ' + rowsLine(m.worstRoutes, unit));
+      lines.push('Worst device classes: ' + rowsLine(m.worstDevices, unit));
+    });
+
+    lines.push('');
+    lines.push('## Collection health');
+    lines.push('accepted ' + report.ingest.accepted +
+      ', malformed ' + report.ingest.malformed +
+      ', too large ' + report.ingest.tooLarge +
+      ', store errors ' + report.ingest.storeErrors +
+      ', records held ' + (report.coverage ? report.coverage.total : 0) + '.');
+
+    lines.push('');
+    lines.push('## What this data is not');
+    report.caveats.forEach(function (c) { lines.push('- ' + c); });
+
+    lines.push('');
+    lines.push('## What I want back');
+    lines.push('1. The two or three metrics worth working on, and why these numbers say so.');
+    lines.push('2. For each, the likely causes that are consistent with the split between');
+    lines.push('   routes, device classes, and percentiles above. Say which cause the data');
+    lines.push('   supports and which it merely permits.');
+    lines.push('3. Concrete changes, ordered by expected effect against effort, each naming');
+    lines.push('   the metric it should move and roughly how far.');
+    lines.push('4. What further evidence would confirm or kill each hypothesis, given that');
+    lines.push('   this is field data with no waterfall and no element attribution.');
+    lines.push('');
+    lines.push('Do not guess at my stack or my code. Ask for what you need, or say what');
+    lines.push('you would need to look at. If the sample count is too small to support a');
+    lines.push('conclusion, say that instead of drawing one.');
+
+    return lines.join('\n');
+  }
+
   // ------------------------------------------------------------------ load
 
   function load() {
@@ -615,7 +793,13 @@
   }
 
   el.refresh.addEventListener('click', load);
-  el.windowSel.addEventListener('change', load);
+  el.windowSel.addEventListener('change', function () {
+    exportStatus('');
+    load();
+  });
+  el.copyJSON.addEventListener('click', copyJSON);
+  el.downloadJSON.addEventListener('click', downloadJSON);
+  el.copyPrompt.addEventListener('click', copyPrompt);
 
   buildMetricSelector();
   renderLedger();

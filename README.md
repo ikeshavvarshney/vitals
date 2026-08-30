@@ -88,6 +88,7 @@ Verified against real sites in Chrome 152. Other browsers are untested.
 - Ingests over HTTP, stores on local disk, survives restart
 - Dashboard with p75 per metric, banded good / needs improvement / poor
 - Time series and per-route breakdown
+- Export a window as JSON, or as a prompt for an AI agent to read
 - One binary, one data directory, no external services
 
 ## Documentation
