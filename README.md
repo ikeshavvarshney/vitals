@@ -141,15 +141,6 @@ became `internal/httpx`. `web-vitals` became a hand-written beacon. React, a
 bundler, and a charting library became [XXX] lines of vanilla JS emitting inline
 SVG. A database server and driver became an append log and a sorted slice.
 
-## Documents
-
-| File | Contents |
-|---|---|
-| [`PRD.md`](PRD.md) | Scope, priorities, and the cut lines decided in advance |
-| [`DESIGN.md`](DESIGN.md) | Architecture, storage format, statistics, and JSON API |
-| [`STDLIB.md`](STDLIB.md) | Every package replaced, and where the original is better |
-| [`CLAUDE.md`](CLAUDE.md) | The dependency rules this repository is built under |
-
 ## Build targets
 
 | Command | Does |

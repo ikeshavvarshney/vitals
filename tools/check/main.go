@@ -102,7 +102,8 @@ func main() {
 		for _, v := range violations {
 			fmt.Fprintln(os.Stderr, v)
 		}
-		fmt.Fprintln(os.Stderr, "\nFix the code, never the check. See CLAUDE.md.")
+		fmt.Fprintln(os.Stderr, "\nThis project ships with zero third-party runtime dependencies.")
+		fmt.Fprintln(os.Stderr, "Fix the code, never the check.")
 		os.Exit(1)
 	}
 

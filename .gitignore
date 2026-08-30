@@ -3,3 +3,8 @@
 /vitals.repro1
 /vitals.repro2
 /data/
+
+# Internal working documents, kept locally but not published.
+CLAUDE.md
+PRD.md
+DESIGN.md
