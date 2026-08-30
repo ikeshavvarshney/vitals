@@ -1,14 +1,10 @@
 // Package store persists Core Web Vitals measurements as an append-only log on
 // local disk and serves time-range queries from an in-memory index.
 //
-// The on-disk format is JSON Lines, one file per UTC day. This is a deliberate
-// choice rather than a placeholder: at the scale this tool targets, one site
-// and thousands of page views a day, a log plus a sorted slice is the correct
-// engineering answer. It has no replication, no compaction, and no query
-// planner, and it would not survive being pointed at a large site.
-//
-// Writes are buffered. A crash loses at most [FlushInterval] of samples. For
-// performance telemetry that is an intentional trade.
+// The format is JSON Lines, one file per UTC day, replayed into a sorted slice
+// at startup. This is a deliberate choice for the scale it targets, one site:
+// no replication, no compaction, no query planner, and the whole set lives in
+// memory. Writes are buffered, so a crash loses at most [FlushInterval].
 package store
 
 import (
@@ -26,18 +22,18 @@ type Record struct {
 	At time.Time
 	// Route is the request path with the query string stripped.
 	Route string
-	// Session is the coarse, daily-rotating visitor identifier. It is derived,
-	// never stored in a cookie, and cannot be linked across days.
+	// Session is the coarse, daily-rotating visitor identifier. Derived, never
+	// stored in a cookie, and unlinkable across days.
 	Session string
 	// Width is the viewport width in CSS pixels, used to derive a device class.
 	Width int
-	// Values holds the measured metrics. A metric absent from the map was not
-	// reported by the browser, which is different from being reported as zero.
+	// Values holds the measured metrics. An absent metric was not reported,
+	// which is not the same as being reported as zero.
 	Values map[stats.Metric]float64
 }
 
-// wireRecord is the on-disk shape. The keys are short because the file is
-// written once per page view and read back in full on every restart.
+// wireRecord is the on-disk shape. Short keys: written once per page view and
+// read back in full on every restart.
 type wireRecord struct {
 	T int64              `json:"t"`           // epoch milliseconds
 	U string             `json:"u"`           // route
@@ -67,10 +63,8 @@ func (r Record) MarshalLine() ([]byte, error) {
 }
 
 // UnmarshalLine decodes a single JSON line produced by [Record.MarshalLine].
-//
-// Unknown metric keys and non-finite values are dropped rather than rejected: a
-// log written by a newer version should still replay in an older one, and a
-// single bad field should not cost the whole record.
+// Unknown metric keys and non-finite values are dropped rather than rejected,
+// so one bad field does not cost the whole record.
 func UnmarshalLine(line []byte) (Record, error) {
 	var w wireRecord
 	if err := json.Unmarshal(line, &w); err != nil {
@@ -103,10 +97,8 @@ func UnmarshalLine(line []byte) (Record, error) {
 // DeviceClass is a coarse device bucket derived from viewport width.
 type DeviceClass string
 
-// The three device classes. They are derived from viewport width rather than
-// from the user-agent string: user-agent sniffing is unreliable, is being
-// actively reduced by browsers, and would be a fingerprinting surface we do
-// not want.
+// The three device classes, derived from viewport width rather than from the
+// user-agent string, which is unreliable and a fingerprinting surface.
 const (
 	DeviceMobile  DeviceClass = "mobile"
 	DeviceTablet  DeviceClass = "tablet"
@@ -120,8 +112,8 @@ const (
 	tabletMaxWidth = 1023
 )
 
-// Device returns the record's device class, or [DeviceUnknown] when the beacon
-// reported no viewport width.
+// Device returns the record's device class, or [DeviceUnknown] when no viewport
+// width was reported.
 func (r Record) Device() DeviceClass {
 	switch {
 	case r.Width <= 0:

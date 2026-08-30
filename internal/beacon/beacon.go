@@ -1,10 +1,9 @@
 // Package beacon serves the client-side collection script.
 //
-// Two files are kept in sync by hand: beacon.src.js is the readable, commented
-// version that a reviewer reads, and beacon.min.js is the minified version that
-// ships. There is no minifier in this project to run, so the minification is
-// manual. [MaxBytes] is enforced by a test, so the central claim of the project
-// cannot quietly stop being true.
+// Two files are kept in sync by hand: beacon.src.js is the readable source a
+// reviewer reads, and beacon.min.js is what ships, minified by hand because this
+// project has no minifier to run. [MaxBytes] is enforced by a test, so the
+// central claim cannot quietly stop being true.
 package beacon
 
 import (
@@ -15,12 +14,11 @@ import (
 	"vitals/internal/httpx"
 )
 
-// MaxBytes is the hard budget for the raw minified beacon.
-//
-// This is the number the README advertises. A build that exceeds it fails.
+// MaxBytes is the hard budget for the raw minified beacon, and the number the
+// README advertises. A build that exceeds it fails.
 const MaxBytes = 1024
 
-// Path is where the beacon is served. It is deliberately short: the URL is on
+// Path is where the beacon is served, kept short because the URL appears on
 // every instrumented page.
 const Path = "/b.js"
 
@@ -39,12 +37,11 @@ func Source() []byte { return source }
 // Size returns the raw byte count of the served beacon.
 func Size() int { return len(minified) }
 
-// Handler serves the beacon with a content-derived ETag and gzip negotiation,
-// the same way every other static asset is served.
+// Handler serves the beacon like any other static asset, with a content-derived
+// ETag and gzip negotiation.
 //
-// The script is served from this binary, never from a CDN. That is not a
-// preference: a third-party origin on every instrumented page is exactly the
-// cost this tool exists to avoid.
+// It is served from this binary, never a CDN: a third-party origin on every
+// instrumented page is exactly the cost this tool exists to avoid.
 func Handler() (http.Handler, error) {
 	fs, err := httpx.NewFileServerFromMap(map[string][]byte{
 		"b.js":          minified,
@@ -55,8 +52,8 @@ func Handler() (http.Handler, error) {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The source is offered alongside the minified script so that anyone
-		// reading the page can check what it does without a build step.
+		// The readable source is advertised so anyone can check what the
+		// minified script does without a build step.
 		w.Header().Set("X-Beacon-Source", "/beacon.src.js")
 		w.Header().Set("X-Beacon-Bytes", strconv.Itoa(len(minified)))
 		fs.ServeHTTP(w, r)

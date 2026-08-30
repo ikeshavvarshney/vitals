@@ -13,20 +13,18 @@ import (
 	"vitals/internal/store"
 )
 
-// sessionLen is the number of hex characters kept from the session digest.
-// Eight characters is enough to tell visitors apart within a single day and
-// short enough that it carries no useful information out of that day.
+// sessionLen is how much of the session digest is kept: enough to tell visitors
+// apart within one day, too little to be useful beyond it.
 const sessionLen = 8
 
-// Appender is the subset of [store.Store] that ingest needs. Taking an
-// interface here keeps the handler testable without touching the disk.
+// Appender is the subset of [store.Store] that ingest needs, so the handler is
+// testable without touching the disk.
 type Appender interface {
 	Append(store.Record) error
 }
 
 // Counters records what the endpoint has done since startup. The dashboard
-// shows these, because a rejection count that nobody can see is a rejection
-// count that nobody fixes.
+// shows them: an invisible rejection count is one nobody fixes.
 type Counters struct {
 	// Accepted is the number of payloads stored.
 	Accepted uint64 `json:"accepted"`
@@ -41,8 +39,7 @@ type Counters struct {
 // Handler accepts beacon payloads at POST /v1/collect.
 type Handler struct {
 	store Appender
-	// now is the clock, replaceable in tests.
-	now func() time.Time
+	now   func() time.Time // replaceable in tests
 
 	accepted    atomic.Uint64
 	malformed   atomic.Uint64
@@ -67,14 +64,12 @@ func (h *Handler) Counters() Counters {
 
 // ServeHTTP implements the collection endpoint.
 //
-// Every outcome that is not a protocol error answers 204. A beacon cannot act
-// on an error and will not retry usefully, and an endpoint that returns 4xx to
-// sendBeacon just fills the visitor's console with noise while still losing the
-// sample. Rejections are counted instead of reported.
+// Every outcome that is not a protocol error answers 204: a beacon cannot act on
+// an error, so rejections are counted rather than reported.
 //
-// No CORS headers are set, and none are needed: sendBeacon with the default
-// text/plain content type is a simple request, so the browser sends it
-// cross-origin without a preflight and never needs to read the response.
+// No CORS headers are set and none are needed. sendBeacon's default text/plain
+// content type makes this a CORS-simple request, sent cross-origin without a
+// preflight and never read by the page.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -82,7 +77,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read one byte past the limit so an oversized body is detected without
+	// One byte past the limit, so an oversized body is detected without
 	// buffering all of it.
 	body, err := io.ReadAll(io.LimitReader(r.Body, MaxBodyBytes+1))
 	if err != nil {
@@ -103,8 +98,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A payload carrying no usable metric is not worth a record.
-	if len(payload.Values) == 0 {
+	if len(payload.Values) == 0 { // nothing worth a record
 		h.malformed.Add(1)
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -112,9 +106,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	now := h.now()
 	rec := store.Record{
-		// The server's clock is authoritative. The client timestamp is parsed
-		// and validated but never used for storage, because a visitor with a
-		// wrong clock would otherwise scatter records across the timeline.
+		// Server clock, not the client's: a visitor with a wrong clock would
+		// otherwise scatter records across the timeline.
 		At:      now,
 		Route:   payload.Route,
 		Session: SessionID(clientIP(r), r.UserAgent(), now),
@@ -135,12 +128,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // SessionID derives a coarse visitor identifier from the request's origin and
 // the current UTC date.
 //
-// This is the privacy design, not an implementation detail. There is no cookie
-// and no persistent identifier. The date is part of the input, so the value
-// rotates at midnight UTC and the same visitor is unlinkable across days. The
-// digest is truncated to 8 hex characters, which is enough to distinguish
-// visitors within one day and too short to be useful for anything else. The IP
-// address itself is never stored.
+// This is the privacy design, not an implementation detail: no cookie, no
+// persistent identifier, and the IP is never stored. The date is part of the
+// input, so the value rotates at midnight UTC and a visitor is unlinkable
+// across days.
 func SessionID(ip, userAgent string, at time.Time) string {
 	h := sha256.New()
 	h.Write([]byte(ip))
@@ -154,10 +145,9 @@ func SessionID(ip, userAgent string, at time.Time) string {
 
 // clientIP returns the address the request came from.
 //
-// Forwarded headers are deliberately ignored. They are trivially spoofed by the
-// client, and trusting them without knowing the proxy topology would let anyone
-// fabricate distinct sessions. Behind a reverse proxy this means every visitor
-// shares one session id, which is a real limitation and is documented as one.
+// Forwarded headers are deliberately ignored: they are trivially spoofed, and
+// trusting them would let anyone fabricate distinct sessions. Behind a reverse
+// proxy this means every visitor shares one session id, a documented limitation.
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

@@ -1,30 +1,25 @@
 // Package stats provides fixed-bucket histograms, approximate percentiles, and
 // Core Web Vitals banding.
 //
-// Percentiles are read off cumulative bucket counts rather than computed from a
-// sorted sample set. That is what production RUM systems do: it is O(1) per
-// observation, allocates nothing after construction, and keeps memory flat
-// regardless of traffic. It is also approximate, and the error is bounded and
-// stated. See [Histogram.RelativeError].
+// Percentiles are read off cumulative bucket counts rather than from a sorted
+// sample set: O(1) per observation with flat memory, but approximate. The error
+// is bounded and stated by [Histogram.RelativeError].
 package stats
 
 import (
 	"math"
 )
 
-// Duration histogram layout. Bucket boundaries grow geometrically so that
-// relative error is constant across the range, which is the right shape for
-// latency: the difference between 20ms and 25ms does not matter, the difference
-// between 2000ms and 2500ms does.
+// Duration histogram layout. Boundaries grow geometrically so relative error is
+// constant across the range, which is the right shape for latency.
 const (
 	durationMin   = 1.0     // ms; values below this share bucket 0
 	durationMax   = 60000.0 // ms; values at or above this share the overflow bucket
 	durationRatio = 1.1     // each bucket is 10% wider than the one below it
 )
 
-// Score histogram layout, used for CLS. CLS is unitless, small, and bounded in
-// practice, so linear buckets give a flat absolute error instead of a flat
-// relative one.
+// Score histogram layout, used for CLS. Linear buckets give a flat absolute
+// error, which suits a small unitless value.
 const (
 	scoreMax   = 1.0
 	scoreWidth = 0.005
@@ -67,19 +62,15 @@ func New(layout Layout) *Histogram {
 func bucketCount(layout Layout) int {
 	switch layout {
 	case LayoutScore:
-		// One bucket per scoreWidth across [0, scoreMax), plus overflow.
 		return int(math.Ceil(scoreMax/scoreWidth)) + 1
 	default:
-		// Bucket 0 holds [0, durationMin). Buckets 1..n cover the geometric
-		// range. The final bucket holds everything at or above durationMax.
 		n := int(math.Ceil(math.Log(durationMax/durationMin) / math.Log(durationRatio)))
 		return n + 2
 	}
 }
 
-// Add records one observation. Negative and non-finite values are ignored:
-// they cannot come from a well-formed measurement, and silently dropping one
-// bad sample is better than poisoning every percentile derived from it.
+// Add records one observation. Negative and non-finite values are ignored
+// rather than poisoning every percentile derived from them.
 func (h *Histogram) Add(v float64) {
 	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
 		return
@@ -124,18 +115,15 @@ func (h *Histogram) index(v float64) int {
 	return i
 }
 
-// representative returns the value reported for observations in bucket i.
-//
-// For the geometric layout it is the geometric mean of the bucket bounds, which
-// halves the worst-case relative error compared with reporting either bound.
-// For the linear layout it is the arithmetic midpoint.
+// representative returns the value reported for observations in bucket i: the
+// geometric mean of the bucket bounds, which halves the worst-case relative
+// error compared with reporting either bound.
 func (h *Histogram) representative(i int) float64 {
 	last := len(h.counts) - 1
 
 	if h.layout == LayoutScore {
 		if i >= last {
-			// Open-ended top bucket: the observed maximum is the honest answer.
-			return math.Max(h.max, scoreMax)
+			return math.Max(h.max, scoreMax) // open-ended top bucket
 		}
 		return (float64(i) + 0.5) * scoreWidth
 	}
@@ -151,13 +139,12 @@ func (h *Histogram) representative(i int) float64 {
 	}
 }
 
-// Quantile returns the approximate value at quantile q, where q is in [0, 1].
-// ok is false when the histogram is empty, in which case the value is zero.
+// Quantile returns the approximate value at quantile q, in [0, 1]. ok is false
+// when the histogram is empty.
 //
-// The result is the representative value of the bucket containing the sample at
-// rank ceil(q*n), so it is accurate to within the bucket width. It is never
-// interpolated between buckets: interpolation would imply a precision the data
-// does not have.
+// The result is the representative value of the bucket holding the sample at
+// rank ceil(q*n), accurate to within the bucket width. Values are never
+// interpolated between buckets: that would imply precision the data lacks.
 func (h *Histogram) Quantile(q float64) (value float64, ok bool) {
 	if h.total == 0 {
 		return 0, false
@@ -169,8 +156,7 @@ func (h *Histogram) Quantile(q float64) (value float64, ok bool) {
 		return h.max, true
 	}
 
-	// Rank of the sample we want, 1-based.
-	rank := uint64(math.Ceil(q * float64(h.total)))
+	rank := uint64(math.Ceil(q * float64(h.total))) // 1-based
 	if rank < 1 {
 		rank = 1
 	}
@@ -185,9 +171,9 @@ func (h *Histogram) Quantile(q float64) (value float64, ok bool) {
 	return h.max, true
 }
 
-// clampToObserved keeps a bucket representative inside the range of values that
-// were actually observed. Without this, a histogram holding a single 3ms sample
-// would report a p75 of 3.14ms, which is a number no visitor experienced.
+// clampToObserved keeps a bucket representative inside the observed range.
+// Without it a single 3ms sample would report a p75 of 3.14ms, a number no
+// visitor experienced.
 func clampToObserved(h *Histogram, v float64) float64 {
 	return math.Min(math.Max(v, h.min), h.max)
 }
@@ -201,8 +187,8 @@ func (h *Histogram) Min() float64 { return h.min }
 // Max returns the largest observed value, or 0 if empty.
 func (h *Histogram) Max() float64 { return h.max }
 
-// Mean returns the arithmetic mean of the observations, or 0 if empty. Unlike
-// the quantiles, the mean is exact: it is accumulated from the raw values.
+// Mean returns the arithmetic mean, or 0 if empty. Unlike the quantiles it is
+// exact, being accumulated from the raw values.
 func (h *Histogram) Mean() float64 {
 	if h.total == 0 {
 		return 0
@@ -210,9 +196,8 @@ func (h *Histogram) Mean() float64 {
 	return h.sum / float64(h.total)
 }
 
-// Merge adds the contents of other into h. Both histograms must use the same
-// layout; merging different layouts returns an error rather than producing a
-// quietly wrong result.
+// Merge adds the contents of other into h. Both must use the same layout;
+// merging different layouts returns an error rather than a wrong result.
 func (h *Histogram) Merge(other *Histogram) error {
 	if other == nil {
 		return nil
@@ -237,13 +222,9 @@ func (h *Histogram) Merge(other *Histogram) error {
 	return nil
 }
 
-// RelativeError returns the worst-case relative error of a quantile drawn from
-// the geometric range of this histogram, as a fraction.
-//
-// For the duration layout this is sqrt(ratio)-1, about 0.0488, because the
-// reported value is the geometric mean of a bucket whose bounds differ by a
-// factor of ratio. The score layout is linear, so its error is absolute rather
-// than relative and this returns 0; use [Histogram.AbsoluteError] instead.
+// RelativeError returns the worst-case relative error of a quantile, as a
+// fraction: sqrt(ratio)-1, about 0.0488, for the duration layout. The score
+// layout returns 0; use [Histogram.AbsoluteError] for that one.
 func (h *Histogram) RelativeError() float64 {
 	if h.layout == LayoutScore {
 		return 0
@@ -252,8 +233,7 @@ func (h *Histogram) RelativeError() float64 {
 }
 
 // AbsoluteError returns the worst-case absolute error for the score layout,
-// which is half a bucket width. It returns 0 for the duration layout, whose
-// error is relative rather than absolute.
+// half a bucket width. It returns 0 for the duration layout.
 func (h *Histogram) AbsoluteError() float64 {
 	if h.layout == LayoutScore {
 		return scoreWidth / 2

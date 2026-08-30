@@ -1,15 +1,9 @@
 /*
  * vitals dashboard.
  *
- * Colour does real work here rather than decoration. Three status colours come
- * straight from the Core Web Vitals banding and always mean the same thing.
- * Each metric additionally carries its own hue, used for its card rail, its
- * chart line, and its area fill, so a chart is identifiable at a glance and two
- * metrics are never confused.
- *
- * All of it is CSS: no images, no gradients loaded from anywhere, no web font.
- * The system font stack is the only stack. Colour is free in bytes, which is
- * why a tool arguing about page weight can afford to look like something.
+ * Two colour layers: three status colours from the Core Web Vitals banding,
+ * always meaning the same thing, and one hue per metric for identity. No
+ * images, no web font, nothing fetched. Colour is free in bytes.
  */
 
 :root {
@@ -138,7 +132,7 @@ h2 {
   white-space: nowrap;
 }
 
-/* Header. The top rule is the three status colours, in order. */
+/* Top rule is the three status colours, in order. */
 .bar {
   position: relative;
   display: flex;
@@ -244,8 +238,8 @@ button:active { filter: brightness(0.95); }
 }
 .status[data-state="error"] { color: var(--poor); font-weight: 600; }
 
-/* Scorecard. Each card carries its metric's hue as a top rail, and its band as
-   a tinted value. Colour is never the only signal: the band is also written. */
+/* Each card takes its metric's hue as a top rail and its band as a tint.
+   Colour is never the only signal: the band is written out too. */
 .scorecard {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr));

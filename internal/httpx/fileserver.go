@@ -13,14 +13,12 @@ import (
 	"strings"
 )
 
-// gzipMinBytes is the size below which compression is not attempted. Below
-// roughly this size the gzip header and trailer cost more than the compression
-// saves, and the response is a single packet either way.
+// gzipMinBytes is the size below which the gzip header and trailer cost more
+// than compression saves.
 const gzipMinBytes = 512
 
-// CacheControl values. HTML is revalidated on every view so a deploy is visible
-// immediately; other assets are cached but still carry an ETag, so a
-// revalidation costs one 304 rather than a full transfer.
+// Cache policy. HTML revalidates every view so a deploy is visible at once;
+// other assets are cached but carry an ETag, so revalidation costs one 304.
 const (
 	cacheHTML  = "no-cache"
 	cacheAsset = "public, max-age=3600"
@@ -38,20 +36,17 @@ type asset struct {
 
 // FileServer serves a fixed set of files from an [fs.FS].
 //
-// Every file is read, hashed, and compressed once when the server is built, not
-// per request. The asset set is embedded in the binary and never changes at
-// runtime, so there is nothing to invalidate and no reason to touch the disk
-// again. This is what makes the handler allocation-free on the hot path.
+// Every file is read, hashed, and compressed once at construction. The asset set
+// is embedded and never changes at runtime, so there is nothing to invalidate
+// and the request path allocates nothing.
 type FileServer struct {
 	assets map[string]*asset
 	// index is the file served for a directory request.
 	index string
 }
 
-// NewFileServer prepares a handler serving every file in fsys.
-//
-// Paths are served relative to the root of fsys, so a file at "dash/app.js"
-// is served at "/dash/app.js" unless the caller strips a prefix first.
+// NewFileServer prepares a handler serving every file in fsys, at paths
+// relative to its root.
 func NewFileServer(fsys fs.FS) (*FileServer, error) {
 	s := &FileServer{
 		assets: make(map[string]*asset),
@@ -83,11 +78,8 @@ func NewFileServer(fsys fs.FS) (*FileServer, error) {
 }
 
 // NewFileServerFromMap prepares a handler serving an explicit set of files,
-// keyed by path relative to the root and without a leading slash.
-//
-// This exists for callers that hold their assets as bytes rather than behind an
-// [fs.FS], which is the case when a handful of files are embedded individually
-// rather than as a directory.
+// keyed by path without a leading slash, for callers holding bytes rather than
+// an [fs.FS].
 func NewFileServerFromMap(files map[string][]byte) (*FileServer, error) {
 	if len(files) == 0 {
 		return nil, fmt.Errorf("httpx: no assets found")
@@ -104,7 +96,7 @@ func NewFileServerFromMap(files map[string][]byte) (*FileServer, error) {
 }
 
 // newAsset prepares one file: media type, cache policy, entity tag, and a gzip
-// encoding when that is smaller than the original.
+// encoding when that is smaller.
 func newAsset(name string, body []byte) *asset {
 	ct := ContentType(name)
 
@@ -129,19 +121,18 @@ func newAsset(name string, body []byte) *asset {
 	return a
 }
 
-// etagOf returns a strong entity tag derived from the content itself.
+// etagOf returns a strong entity tag derived from the content.
 //
-// Content hashing rather than modification time is what makes this correct for
-// embedded assets: a rebuilt binary has no meaningful mtime, and two builds of
-// identical content should produce identical tags. The digest is truncated to
-// 128 bits, which is far beyond what a cache validator needs.
+// Hashing content rather than mtime is what makes this correct for embedded
+// assets: a rebuilt binary has no meaningful mtime, and identical bytes should
+// share a cache entry. 128 bits is far beyond what a validator needs.
 func etagOf(body []byte) string {
 	sum := sha256.Sum256(body)
 	return `"` + base64.RawURLEncoding.EncodeToString(sum[:16]) + `"`
 }
 
-// gzipBytes compresses b at the best compression level. Assets are compressed
-// once at startup, so the slowest level costs nothing per request.
+// gzipBytes compresses b at the best level. Done once at startup, so the
+// slowest level costs nothing per request.
 func gzipBytes(b []byte) ([]byte, error) {
 	var buf bytes.Buffer
 	zw, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
@@ -202,8 +193,7 @@ func (s *FileServer) lookup(urlPath string) (*asset, bool) {
 }
 
 // ServeFile serves one named asset, bypassing directory-index resolution. It
-// reports false when no such asset exists, leaving the response untouched so
-// the caller can decide what to do.
+// reports false and leaves the response untouched when there is no such asset.
 func (s *FileServer) ServeFile(w http.ResponseWriter, r *http.Request, urlPath string) bool {
 	a, ok := s.assets[cleanPath(urlPath)]
 	if !ok {
@@ -221,16 +211,14 @@ func (s *FileServer) write(w http.ResponseWriter, r *http.Request, a *asset) {
 	h.Set("Cache-Control", a.cacheControl)
 	h.Set("ETag", a.etag)
 
-	// The response body depends on Accept-Encoding, so any cache between here
-	// and the browser must key on it. Omitting this is how a proxy ends up
-	// serving a gzip stream to a client that did not ask for one.
+	// Without this a proxy can serve the gzip stream to a client that did not
+	// ask for one.
 	if a.gzipped != nil {
 		h.Set("Vary", "Accept-Encoding")
 	}
 
 	if matchesETag(r.Header.Get("If-None-Match"), a.etag) {
-		// A 304 carries no body and must not carry Content-Length.
-		h.Del("Content-Length")
+		h.Del("Content-Length") // a 304 carries neither body nor length
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
@@ -248,18 +236,14 @@ func (s *FileServer) write(w http.ResponseWriter, r *http.Request, a *asset) {
 	}
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(body); err != nil {
-		// The client hung up mid-response. There is nothing to recover and
-		// nothing useful to log per request.
-		return
+		return // client hung up; nothing to recover
 	}
 }
 
-// cleanPath normalises a request path and contains it inside the asset root.
+// cleanPath normalises a request path.
 //
-// path.Clean resolves "." and ".." segments, so "/../../etc/passwd" becomes
-// "/etc/passwd", which then simply fails to match any asset. Because assets are
-// looked up in a map rather than opened from disk, traversal cannot escape to
-// the filesystem even if a segment survives.
+// Traversal cannot escape regardless: assets are looked up in a map, never
+// opened from disk by request path. path.Clean only keeps the keys tidy.
 func cleanPath(p string) string {
 	if p == "" {
 		return "/"
@@ -276,9 +260,8 @@ func cleanPath(p string) string {
 	return p
 }
 
-// matchesETag reports whether an If-None-Match header matches the entity tag.
-// It handles the "*" wildcard and comma-separated lists, and tolerates the weak
-// prefix, since a weak match is sufficient for a GET.
+// matchesETag reports whether an If-None-Match header matches the entity tag,
+// handling "*", comma-separated lists, and the weak prefix.
 func matchesETag(header, etag string) bool {
 	if header == "" {
 		return false
@@ -295,10 +278,8 @@ func matchesETag(header, etag string) bool {
 	return false
 }
 
-// acceptsGzip reports whether the client accepts gzip encoding.
-//
-// It looks for the token rather than parsing full quality values. The one case
-// that matters is an explicit "gzip;q=0", which means the client refuses gzip.
+// acceptsGzip reports whether the client accepts gzip. Only the token matters,
+// plus an explicit "gzip;q=0", which is a refusal.
 func acceptsGzip(header string) bool {
 	for _, part := range strings.Split(header, ",") {
 		part = strings.TrimSpace(part)

@@ -12,10 +12,8 @@ import (
 //go:embed assets
 var assetsFS embed.FS
 
-// Assets returns a handler serving the dashboard's HTML, CSS, and JavaScript.
-//
-// The files are embedded in the binary, so there is no asset directory to ship
-// alongside it and no path to get wrong on someone else's machine.
+// Assets returns a handler serving the dashboard's HTML, CSS, and JavaScript,
+// embedded so there is no asset directory to ship alongside the binary.
 func Assets() (http.Handler, error) {
 	sub, err := fs.Sub(assetsFS, "assets")
 	if err != nil {

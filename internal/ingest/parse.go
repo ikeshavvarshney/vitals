@@ -1,10 +1,9 @@
 // Package ingest validates and accepts beacon payloads over HTTP.
 //
-// The payload parser is hand-written rather than built on encoding/json. This
-// is the only place in the program that reads untrusted input, so it is worth
-// owning the failure modes: the parser accepts exactly one object shape, never
-// allocates for input it is going to reject, imposes its own depth and length
-// limits, and cannot be steered into unbounded work by a hostile body.
+// The payload parser is hand-written rather than built on encoding/json. This is
+// the only place the program reads untrusted input, so the failure modes are
+// worth owning: it accepts one object shape, imposes its own length limits, and
+// cannot be steered into unbounded work by a hostile body.
 package ingest
 
 import (
@@ -18,22 +17,20 @@ import (
 	"vitals/internal/stats"
 )
 
-// Payload limits. These are enforced by the parser itself, not by a caller
-// remembering to check afterwards.
+// Payload limits, enforced by the parser itself rather than by a caller.
 const (
-	// MaxBodyBytes is the largest request body accepted. A well-formed beacon
-	// payload is under 200 bytes; this leaves generous room for a long route.
+	// MaxBodyBytes is the largest request body accepted. A well-formed payload
+	// is under 200 bytes.
 	MaxBodyBytes = 4096
-	// MaxRouteBytes caps the stored route. Longer routes are truncated rather
-	// than rejected, because a long URL is a real page, not an attack.
+	// MaxRouteBytes caps the stored route. Longer routes are truncated, not
+	// rejected: a long URL is a real page, not an attack.
 	MaxRouteBytes = 512
-	// maxMetrics caps the entries accepted in the metrics object, so a body
-	// full of unknown keys cannot force unbounded map growth.
+	// maxMetrics bounds map growth from a body full of unknown keys.
 	maxMetrics = 32
 )
 
-// Parse errors. They are deliberately coarse: the endpoint answers 204 either
-// way, and the counters only need to distinguish malformed from oversized.
+// Parse errors, deliberately coarse: the endpoint answers 204 either way and
+// the counters only distinguish malformed from oversized.
 var (
 	// ErrTooLarge is returned when the body exceeds MaxBodyBytes.
 	ErrTooLarge = errors.New("ingest: payload too large")
@@ -45,19 +42,18 @@ var (
 type Payload struct {
 	// Route is the page path, query string already stripped by the beacon.
 	Route string
-	// At is the client's epoch-millisecond timestamp, or 0 if not sent. It is
-	// never trusted as the storage timestamp; the server's clock is used.
+	// At is the client's epoch-millisecond timestamp, or 0 if not sent. Never
+	// trusted for storage; the server's clock is used instead.
 	At int64
 	// Width is the viewport width in CSS pixels, or 0 if not sent.
 	Width int
-	// Values holds the reported metrics, already filtered to known keys with
-	// finite, non-negative, in-range values.
+	// Values holds metrics already filtered to known keys with finite,
+	// non-negative, in-range values.
 	Values map[stats.Metric]float64
 }
 
-// plausibleMax is the largest value accepted for each metric. A browser that
-// reports a 40-minute LCP has a bug or is being tampered with, and one such
-// sample would distort the whole distribution.
+// plausibleMax is the largest value accepted per metric. One tampered sample
+// would distort the whole distribution.
 var plausibleMax = map[stats.Metric]float64{
 	stats.LCP:  600000, // 10 minutes
 	stats.INP:  600000,
@@ -66,8 +62,7 @@ var plausibleMax = map[stats.Metric]float64{
 	stats.CLS:  100, // unitless; real values are under 1, but shifts do stack
 }
 
-// Parse decodes a beacon payload. It accepts exactly the shape the beacon
-// sends and ignores any key it does not recognise.
+// Parse decodes a beacon payload, ignoring any key it does not recognise.
 func Parse(body []byte) (Payload, error) {
 	if len(body) > MaxBodyBytes {
 		return Payload{}, ErrTooLarge
@@ -118,7 +113,7 @@ func Parse(body []byte) (Payload, error) {
 
 	p.skipSpace()
 	if p.pos != len(p.buf) {
-		return Payload{}, ErrMalformed // trailing garbage after the object
+		return Payload{}, ErrMalformed // trailing garbage
 	}
 	if out.Route == "" {
 		return Payload{}, ErrMalformed // a measurement without a page is useless
@@ -126,8 +121,8 @@ func Parse(body []byte) (Payload, error) {
 	return out, nil
 }
 
-// metrics parses the "m" object into dst, keeping only known metrics whose
-// values are finite, non-negative, and inside the plausible range.
+// metrics parses the "m" object into dst, keeping only known metrics with
+// finite, non-negative, plausible values.
 func (p *parser) metrics(dst map[stats.Metric]float64) error {
 	p.skipSpace()
 	if !p.consume('{') {
@@ -147,7 +142,7 @@ func (p *parser) metrics(dst map[stats.Metric]float64) error {
 
 		m := stats.Metric(key)
 		if !stats.Valid(m) {
-			return nil // unknown metric, silently dropped
+			return nil // unknown metric, dropped
 		}
 		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
 			return nil
@@ -161,8 +156,8 @@ func (p *parser) metrics(dst map[stats.Metric]float64) error {
 }
 
 // sanitizeRoute strips a query string and fragment, enforces a leading slash,
-// caps the length, and replaces invalid UTF-8. The route ends up in the
-// dashboard, so it must be safe to store and render.
+// caps the length, and replaces invalid UTF-8. The route is rendered on the
+// dashboard, so it must be safe to store.
 func sanitizeRoute(s string) string {
 	for i := 0; i < len(s); i++ {
 		if s[i] == '?' || s[i] == '#' {
@@ -178,7 +173,7 @@ func sanitizeRoute(s string) string {
 	}
 	if len(s) > MaxRouteBytes {
 		s = s[:MaxRouteBytes]
-		// Truncation can cut a multi-byte rune in half.
+		// The cut can land mid-rune.
 		for len(s) > 0 && !utf8.ValidString(s) {
 			s = s[:len(s)-1]
 		}
@@ -195,8 +190,8 @@ type parser struct {
 	pos int
 }
 
-// object consumes the members of an object whose opening brace has already been
-// read, calling fn with each key. fn must consume exactly that key's value.
+// object consumes members of an object whose opening brace was already read.
+// fn must consume exactly that key's value.
 func (p *parser) object(fn func(key string) error) error {
 	p.skipSpace()
 	if p.consume('}') {
@@ -235,8 +230,7 @@ func (p *parser) stringValue() (string, error) {
 		return "", ErrMalformed
 	}
 
-	// Fast path: no escapes, so the bytes can be sliced directly.
-	start := p.pos
+	start := p.pos // fast path: no escapes, so the bytes can be sliced
 	for p.pos < len(p.buf) {
 		c := p.buf[p.pos]
 		if c == '"' {
@@ -255,8 +249,8 @@ func (p *parser) stringValue() (string, error) {
 	return "", ErrMalformed // unterminated
 }
 
-// stringWithEscapes handles the slow path, starting over from the string's
-// first byte so the decoded result includes what the fast path already scanned.
+// stringWithEscapes handles the slow path, replaying from start so the result
+// includes what the fast path already scanned.
 func (p *parser) stringWithEscapes(start int) (string, error) {
 	var out []byte
 	out = append(out, p.buf[start:p.pos]...)
@@ -275,7 +269,7 @@ func (p *parser) stringWithEscapes(start int) (string, error) {
 			continue
 		}
 
-		p.pos++ // consume the backslash
+		p.pos++ // the backslash
 		if p.pos >= len(p.buf) {
 			return "", ErrMalformed
 		}
@@ -308,8 +302,8 @@ func (p *parser) stringWithEscapes(start int) (string, error) {
 	return "", ErrMalformed
 }
 
-// unicodeEscape reads the four hex digits of a \u escape, pairing surrogates
-// where a valid pair follows.
+// unicodeEscape reads a \u escape, pairing surrogates where a valid pair
+// follows and substituting U+FFFD for a lone one.
 func (p *parser) unicodeEscape() (rune, error) {
 	r, err := p.hex4()
 	if err != nil {
@@ -319,7 +313,6 @@ func (p *parser) unicodeEscape() (rune, error) {
 	if !utf16.IsSurrogate(r) {
 		return r, nil
 	}
-	// A high surrogate may be followed by \uXXXX forming a valid pair.
 	if p.pos+1 < len(p.buf) && p.buf[p.pos] == '\\' && p.buf[p.pos+1] == 'u' {
 		save := p.pos
 		p.pos += 2
@@ -332,7 +325,6 @@ func (p *parser) unicodeEscape() (rune, error) {
 		}
 		p.pos = save
 	}
-	// An unpaired surrogate is not a character; substitute rather than reject.
 	return utf8.RuneError, nil
 }
 
@@ -361,8 +353,8 @@ func (p *parser) hex4() (rune, error) {
 	return r, nil
 }
 
-// numberValue reads a JSON number. JSON has no NaN or Infinity literal, so any
-// value this returns is finite by construction.
+// numberValue reads a JSON number. JSON has no NaN or Infinity literal, so the
+// result is finite by construction.
 func (p *parser) numberValue() (float64, error) {
 	p.skipSpace()
 	start := p.pos
@@ -384,8 +376,8 @@ func (p *parser) numberValue() (float64, error) {
 
 	v, err := strconv.ParseFloat(string(p.buf[start:p.pos]), 64)
 	if err != nil {
-		// An overflowing exponent parses to Inf with an ErrRange; treat that as
-		// malformed rather than storing an infinity.
+		// An overflowing exponent yields ErrRange, treated as malformed rather
+		// than stored as an infinity.
 		return 0, fmt.Errorf("%w: %v", ErrMalformed, err)
 	}
 	if math.IsNaN(v) || math.IsInf(v, 0) {
@@ -394,8 +386,8 @@ func (p *parser) numberValue() (float64, error) {
 	return v, nil
 }
 
-// skipValue consumes and discards any JSON value, so unknown keys do not break
-// parsing. Nesting is bounded because the whole body is bounded.
+// skipValue discards any JSON value, so unknown keys do not break parsing.
+// Nesting is bounded because the body is.
 func (p *parser) skipValue() error {
 	p.skipSpace()
 	if p.pos >= len(p.buf) {
@@ -420,8 +412,8 @@ func (p *parser) skipValue() error {
 	}
 }
 
-// skipContainer consumes a balanced object or array, respecting strings so that
-// a brace inside a string does not confuse the depth count.
+// skipContainer consumes a balanced object or array, respecting strings so a
+// brace inside one does not confuse the depth count.
 func (p *parser) skipContainer() error {
 	depth := 0
 	for p.pos < len(p.buf) {

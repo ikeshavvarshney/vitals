@@ -46,22 +46,16 @@ func (b Band) String() string {
 	}
 }
 
-// thresholds holds the upper bound of the good band and the upper bound of the
-// needs-improvement band for one metric. A value at or below Good is good; a
-// value at or below NeedsImprovement is needs-improvement; anything higher is
-// poor.
+// thresholds holds the inclusive upper bound of the good band and of the
+// needs-improvement band. Anything higher is poor.
 type thresholds struct {
 	Good             float64
 	NeedsImprovement float64
 }
 
-// cwvThresholds are the published Core Web Vitals thresholds.
-//
-// Source: web.dev/articles/vitals, "Core Web Vitals metrics and thresholds",
-// which defines LCP at 2500/4000ms, INP at 200/500ms, and CLS at 0.1/0.25. FCP
-// (1800/3000ms) and TTFB (800/1800ms) are Google's supplementary diagnostic
-// thresholds from web.dev/articles/fcp and web.dev/articles/ttfb; they are not
-// Core Web Vitals themselves but are banded the same way here.
+// cwvThresholds are the published Core Web Vitals thresholds, from
+// web.dev/articles/vitals. FCP and TTFB are Google's supplementary diagnostic
+// thresholds rather than Core Web Vitals, but are banded the same way here.
 var cwvThresholds = map[Metric]thresholds{
 	LCP:  {Good: 2500, NeedsImprovement: 4000},
 	INP:  {Good: 200, NeedsImprovement: 500},
@@ -71,8 +65,7 @@ var cwvThresholds = map[Metric]thresholds{
 }
 
 // BandOf rates a value against the published threshold for its metric. An
-// unknown metric is rated Good, because inventing a poor rating for a metric we
-// have no thresholds for would be a fabricated number on the dashboard.
+// unknown metric is rated Good rather than fabricating a worse rating.
 func BandOf(m Metric, value float64) Band {
 	t, ok := cwvThresholds[m]
 	if !ok {
@@ -88,9 +81,9 @@ func BandOf(m Metric, value float64) Band {
 	}
 }
 
-// Thresholds returns the good and needs-improvement upper bounds for a metric,
-// so the dashboard can draw threshold lines without duplicating the constants.
-// ok is false for an unknown metric.
+// Thresholds returns the good and needs-improvement upper bounds, so the
+// dashboard can draw them without duplicating the constants. ok is false for an
+// unknown metric.
 func Thresholds(m Metric) (good, needsImprovement float64, ok bool) {
 	t, found := cwvThresholds[m]
 	if !found {
@@ -99,9 +92,8 @@ func Thresholds(m Metric) (good, needsImprovement float64, ok bool) {
 	return t.Good, t.NeedsImprovement, true
 }
 
-// LayoutOf returns the histogram layout appropriate to a metric. CLS is
-// unitless and small, so it uses the linear score layout; everything else is a
-// duration in milliseconds.
+// LayoutOf returns the histogram layout for a metric. CLS uses the linear score
+// layout; everything else is a duration in milliseconds.
 func LayoutOf(m Metric) Layout {
 	if m == CLS {
 		return LayoutScore

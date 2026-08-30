@@ -53,8 +53,6 @@
     return node;
   }
 
-  // formatValue keeps the number readable without implying precision the
-  // bucketed percentile does not have.
   function formatValue(v, unit) {
     if (v === null || v === undefined) return null;
     if (unit === '') return v.toFixed(3);          // CLS
@@ -154,8 +152,8 @@
     var innerW = CHART.w - CHART.left - CHART.right;
     var innerH = CHART.h - CHART.top - CHART.bottom;
 
-    // The y axis always includes the good threshold, so a healthy chart still
-    // shows where the limit is rather than zooming into noise.
+    // Always include the good threshold, so a healthy chart shows the limit
+    // rather than zooming into noise.
     var maxValue = Math.max(
       data.good * 1.15,
       points.reduce(function (a, b) { return Math.max(a, b.p75); }, 0) * 1.1
@@ -185,7 +183,7 @@
       root.appendChild(label);
     }
 
-    // Threshold lines, drawn only when they fall inside the visible range.
+    // Drawn only when inside the visible range.
     [
       { v: data.good, cls: 'thresh-good', text: 'good' },
       { v: data.needsImprovement, cls: 'thresh-needs', text: 'needs improvement' }
@@ -212,8 +210,8 @@
       y1: CHART.top + innerH, y2: CHART.top + innerH
     }));
 
-    // The line itself. Gaps are real gaps: a bucket with no samples breaks the
-    // polyline rather than interpolating a value nobody measured.
+    // Gaps are real: an empty bucket breaks the polyline rather than
+    // interpolating a value nobody measured.
     var runs = [];
     var run = [];
     data.buckets.forEach(function (b, i) {
@@ -228,7 +226,7 @@
     var baseline = CHART.top + innerH;
     runs.forEach(function (r) {
       if (r.length > 1) {
-        // Area first, so the line's stroke sits cleanly on top of it.
+        // Area first, so the stroke sits cleanly on top of it.
         root.appendChild(svg('polygon', {
           class: 'area',
           points: r[0].x + ',' + baseline + ' ' +
@@ -251,7 +249,7 @@
       });
     });
 
-    // X labels: first, middle, last. More would crowd at mobile widths.
+    // First, middle, last. More would crowd at mobile widths.
     [0, Math.floor((n - 1) / 2), n - 1].forEach(function (i, k) {
       var t = svg('text', {
         class: 'tick', x: x(i), y: CHART.h - 8,
@@ -329,8 +327,8 @@
 
   // ---------------------------------------------------------- weight ledger
 
-  // The tool reports its own weight. This is measured, not asserted: it reads
-  // the resource timings for this very page.
+  // The tool reports its own weight, measured from this page's resource
+  // timings rather than asserted.
   function renderLedger() {
     if (!window.performance || !performance.getEntriesByType) return;
 
@@ -346,14 +344,12 @@
       if (e.name.indexOf('/b.js') !== -1) beacon = size;
     });
 
-    // transferSize is 0 for a cached response, which would otherwise read as
-    // "this page weighs nothing".
+    // 0 for a cached response, which would otherwise read as weightless.
     var pageText = total > 0 ? formatBytes(total) : 'cached';
     document.getElementById('ledger-page').textContent = pageText;
     document.getElementById('ledger-requests').textContent = String(entries.length + 1);
 
-    // The beacon is not loaded by the dashboard itself, so fetch its size from
-    // the header the beacon handler advertises.
+    // The dashboard does not load the beacon, so ask for its advertised size.
     if (beacon > 0) {
       document.getElementById('ledger-beacon').textContent = formatBytes(beacon);
     } else {

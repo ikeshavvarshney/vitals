@@ -16,8 +16,8 @@ import (
 const (
 	// FlushRecords is the number of buffered records that forces a flush.
 	FlushRecords = 200
-	// FlushInterval is the longest a record may sit unflushed. This is the
-	// exact amount of data a crash can lose.
+	// FlushInterval is the longest a record may sit unflushed, and therefore
+	// the exact amount of data a crash can lose.
 	FlushInterval = 2 * time.Second
 )
 
@@ -30,10 +30,8 @@ const dayLayout = "2006-01-02"
 // ErrClosed is returned by operations on a closed Store.
 var ErrClosed = errors.New("store: closed")
 
-// Store is an append-only measurement log with an in-memory index.
-//
-// A Store is safe for concurrent use. Appends take a write lock only long
-// enough to buffer the record; they never wait on disk.
+// Store is an append-only measurement log with an in-memory index. It is safe
+// for concurrent use, and appends never wait on disk.
 type Store struct {
 	dir string
 
@@ -53,11 +51,10 @@ type Store struct {
 }
 
 // Open replays every log file in dir into memory and returns a Store ready to
-// append. The directory is created if it does not exist.
+// append, creating the directory if needed.
 //
-// A truncated or corrupt line, which is what a crash mid-write leaves behind,
-// is skipped with the rest of the file still replayed. The number of skipped
-// lines is returned so the caller can report it rather than hide it.
+// A truncated or corrupt line, which is what a crash mid-write leaves behind, is
+// skipped and counted rather than failing the replay.
 func Open(dir string) (s *Store, skipped int, err error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, 0, fmt.Errorf("creating %s: %w", dir, err)
@@ -104,9 +101,8 @@ func (s *Store) replay() (skipped int, err error) {
 		skipped += n
 	}
 
-	// Replay appends in file order, which is already chronological, but a clock
-	// change or a hand-edited file could break that assumption. Sorting once
-	// here is cheap and makes every query's binary search sound.
+	// File order is already chronological, but a clock change or a hand-edited
+	// file could break that, and every query binary-searches this slice.
 	sort.SliceStable(s.records, func(i, j int) bool {
 		return s.records[i].At.Before(s.records[j].At)
 	})
@@ -123,8 +119,7 @@ func (s *Store) replayFile(path string) (skipped int, err error) {
 	defer f.Close()
 
 	sc := bufio.NewScanner(f)
-	// A record is far smaller than this, but a corrupt file could contain a
-	// very long line and the scanner must not fail the whole replay over it.
+	// Generous, so one corrupt long line cannot fail the whole replay.
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for sc.Scan() {
@@ -140,8 +135,7 @@ func (s *Store) replayFile(path string) (skipped int, err error) {
 		s.records = append(s.records, r)
 	}
 	if err := sc.Err(); err != nil {
-		// A line longer than the buffer means the file is corrupt past this
-		// point. Keep what was read rather than discarding the whole day.
+		// Corrupt past this point. Keep what was read rather than the whole day.
 		if errors.Is(err, bufio.ErrTooLong) {
 			return skipped + 1, nil
 		}
@@ -150,8 +144,7 @@ func (s *Store) replayFile(path string) (skipped int, err error) {
 	return skipped, nil
 }
 
-// reindex rebuilds the route index from the record slice. The caller must hold
-// the write lock, or hold no lock at all during construction.
+// reindex rebuilds the route index. The caller must hold the write lock.
 func (s *Store) reindex() {
 	s.byRoute = make(map[string][]int, len(s.byRoute))
 	for i, r := range s.records {
@@ -183,8 +176,6 @@ func (s *Store) Append(r Record) error {
 		return fmt.Errorf("buffering record: %w", err)
 	}
 
-	// Appends usually arrive in time order, but a slow beacon can land out of
-	// order. Insert in place rather than sorting the whole slice again.
 	s.insertLocked(r)
 
 	s.unwrit++
@@ -195,7 +186,8 @@ func (s *Store) Append(r Record) error {
 }
 
 // insertLocked places r into the sorted record slice and updates the route
-// index. The caller must hold the write lock.
+// index, handling the out-of-order arrival a slow beacon can produce. The
+// caller must hold the write lock.
 func (s *Store) insertLocked(r Record) {
 	i := sort.Search(len(s.records), func(i int) bool {
 		return s.records[i].At.After(r.At)
@@ -210,7 +202,7 @@ func (s *Store) insertLocked(r Record) {
 	s.records = append(s.records, Record{})
 	copy(s.records[i+1:], s.records[i:])
 	s.records[i] = r
-	// Every index at or after i shifted by one, so the route index is rebuilt.
+	// Every index at or after i shifted, so the route index must be rebuilt.
 	// Out-of-order arrivals are rare enough that this is not a hot path.
 	s.reindex()
 }
@@ -259,7 +251,7 @@ func (s *Store) closeFileLocked() error {
 	return nil
 }
 
-// flushLoop flushes the write buffer on a fixed interval until the Store is
+// flushLoop flushes the write buffer every FlushInterval until the Store is
 // closed. This is the mechanism behind the documented durability guarantee.
 func (s *Store) flushLoop() {
 	defer close(s.done)
@@ -271,9 +263,8 @@ func (s *Store) flushLoop() {
 		select {
 		case <-t.C:
 			if err := s.Flush(); err != nil {
-				// Nothing useful can be done here: the caller is not in scope
-				// and dropping telemetry is preferable to crashing the server.
-				// The error is surfaced on the next Append or Close.
+				// No caller in scope. The error surfaces on the next Append or
+				// Close; dropping telemetry beats crashing the server.
 				continue
 			}
 		case <-s.stop:
@@ -301,8 +292,8 @@ func (s *Store) flushLocked() error {
 	return nil
 }
 
-// Close stops the flush loop, writes anything still buffered, and closes the
-// log file. It is safe to call more than once.
+// Close stops the flush loop, flushes, and closes the log file. It is safe to
+// call more than once.
 func (s *Store) Close() error {
 	s.stopOnce.Do(func() {
 		close(s.stop)

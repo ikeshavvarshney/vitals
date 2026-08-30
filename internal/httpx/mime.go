@@ -1,8 +1,6 @@
-// Package httpx serves static assets over HTTP with content hashing,
-// conditional requests, and negotiated compression.
-//
-// It exists in place of a web framework and its middleware stack. Everything
-// here is built on net/http, compress/gzip, and crypto/sha256.
+// Package httpx serves static assets with content hashing, conditional
+// requests, and negotiated compression, in place of a web framework and its
+// middleware stack.
 package httpx
 
 import (
@@ -10,14 +8,12 @@ import (
 	"strings"
 )
 
-// contentTypes maps a file extension to the media type served for it.
+// contentTypes maps a file extension to its media type.
 //
-// The standard library's mime package reads the host's MIME database, which
-// means the same file can be served as a different type on two machines. On
-// Windows it reads the registry, where a stale entry can serve JavaScript as
-// text/plain and break the page. A fixed table is small, and being wrong the
-// same way everywhere is better than being wrong differently on one judge's
-// laptop.
+// mime.TypeByExtension consults the host's MIME database, so the same binary can
+// serve JavaScript as text/plain on a machine with a stale registry entry. A
+// fixed table is wrong the same way everywhere, which is the property that
+// matters.
 var contentTypes = map[string]string{
 	".html":  "text/html; charset=utf-8",
 	".css":   "text/css; charset=utf-8",
@@ -35,9 +31,8 @@ var contentTypes = map[string]string{
 	".woff2": "font/woff2",
 }
 
-// defaultContentType is served for an extension not in the table. It is
-// deliberately not sniffed: guessing at a type for unknown content is how a
-// static server ends up serving HTML that a browser will execute.
+// defaultContentType is served for an unknown extension. Content is never
+// sniffed: guessing is how a static server ends up serving executable HTML.
 const defaultContentType = "application/octet-stream"
 
 // ContentType returns the media type for a file name.
@@ -48,9 +43,8 @@ func ContentType(name string) string {
 	return defaultContentType
 }
 
-// compressible reports whether a media type benefits from gzip. Images, fonts,
-// and archives are already compressed; running them through gzip spends CPU to
-// make the response very slightly larger.
+// compressible reports whether a media type benefits from gzip. Images and
+// fonts are already compressed, so gzip would only make them larger.
 func compressible(contentType string) bool {
 	switch {
 	case strings.HasPrefix(contentType, "text/"):

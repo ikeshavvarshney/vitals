@@ -12,8 +12,8 @@ import (
 	"vitals/internal/store"
 )
 
-// percentile is the quantile the dashboard reports. Core Web Vitals are
-// assessed at the 75th percentile, so that is what every figure here means.
+// percentile is the quantile every figure on the dashboard reports. Core Web
+// Vitals are assessed at the 75th.
 const percentile = 0.75
 
 // API answers the dashboard's JSON requests over a measurement store.
@@ -23,8 +23,7 @@ type API struct {
 	now      func() time.Time
 }
 
-// NewAPI returns an API reading from s. counters may be nil, in which case
-// ingest statistics are reported as zero.
+// NewAPI returns an API reading from s. A nil counters function reports zeros.
 func NewAPI(s *store.Store, counters func() ingest.Counters) *API {
 	if counters == nil {
 		counters = func() ingest.Counters { return ingest.Counters{} }
@@ -50,12 +49,11 @@ type metricSummary struct {
 	P75     *float64     `json:"p75"` // null when there are no samples
 	Band    string       `json:"band"`
 	Samples uint64       `json:"samples"`
-	// Thresholds are included so the dashboard can draw banding without
-	// duplicating the constants in JavaScript.
+	// Thresholds ship with the response so the dashboard need not duplicate
+	// the constants in JavaScript.
 	Good             float64 `json:"good"`
 	NeedsImprovement float64 `json:"needsImprovement"`
-	// Unit is "ms" for durations and "" for the unitless CLS.
-	Unit string `json:"unit"`
+	Unit             string  `json:"unit"` // "ms", or "" for the unitless CLS
 }
 
 // summaryResponse is the payload of GET /api/summary.
@@ -69,7 +67,7 @@ type summaryResponse struct {
 }
 
 // coverageSummary reports what the store holds overall, so the dashboard can
-// say "no data yet" rather than showing an empty chart with no explanation.
+// distinguish an empty window from an empty store.
 type coverageSummary struct {
 	Total  int        `json:"total"`
 	Oldest *time.Time `json:"oldest"`
@@ -204,8 +202,7 @@ func (a *API) handleSeries(w http.ResponseWriter, r *http.Request) {
 			return true
 		}
 		i := int(rec.At.Sub(rng.From) / width)
-		// The final instant of the range belongs to the last bucket rather
-		// than to a bucket that does not exist.
+		// The final instant belongs to the last bucket, not to one past it.
 		if i >= len(hists) {
 			i = len(hists) - 1
 		}
@@ -315,8 +312,7 @@ func (a *API) handleGroup(w http.ResponseWriter, r *http.Request, key func(store
 		resp.Rows = append(resp.Rows, row)
 	}
 
-	// Worst first: the point of a breakdown is to find the bad page. Ties fall
-	// back to the key so the order is stable between requests.
+	// Worst first; ties by key so the order is stable between requests.
 	sort.Slice(resp.Rows, func(i, j int) bool {
 		a, b := resp.Rows[i], resp.Rows[j]
 		switch {
@@ -336,10 +332,9 @@ func (a *API) handleGroup(w http.ResponseWriter, r *http.Request, key func(store
 	writeJSON(w, resp)
 }
 
-// writeJSON sends v as JSON.
-//
-// The body is marshalled before any header is written, so an encoding failure
-// still produces a clean 500 instead of a truncated 200.
+// writeJSON sends v as JSON. The body is marshalled before any header is
+// written, so an encoding failure yields a clean 500 rather than a truncated
+// 200.
 func writeJSON(w http.ResponseWriter, v any) {
 	body, err := json.Marshal(v)
 	if err != nil {
@@ -349,14 +344,12 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 	h := w.Header()
 	h.Set("Content-Type", "application/json; charset=utf-8")
-	// The dashboard reads live data; a cached answer is a stale answer.
-	h.Set("Cache-Control", "no-store")
+	h.Set("Cache-Control", "no-store") // live data; a cached answer is stale
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
 }
 
-// writeError sends a JSON error. The message is the parameter that was wrong,
-// which is safe to echo because it was validated before reaching here.
+// writeError sends a JSON error naming the parameter that was wrong.
 func writeError(w http.ResponseWriter, status int, err error) {
 	body, marshalErr := json.Marshal(map[string]string{"error": err.Error()})
 	if marshalErr != nil {

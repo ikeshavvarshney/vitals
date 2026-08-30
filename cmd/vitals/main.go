@@ -1,8 +1,7 @@
 // Command vitals serves the beacon, ingests Core Web Vitals measurements,
 // stores them on local disk, and serves a dashboard over the same port.
 //
-// One process, one data directory, no external services, and an empty
-// dependency manifest.
+// One process, one data directory, no external services, empty manifest.
 package main
 
 import (
@@ -46,8 +45,8 @@ func run(addr, dataDir string) error {
 	if err != nil {
 		return fmt.Errorf("opening store: %w", err)
 	}
-	// Closing the store flushes whatever is still buffered, so a clean shutdown
-	// loses nothing. A kill -9 loses up to store.FlushInterval.
+	// A clean shutdown flushes and loses nothing; kill -9 loses up to
+	// store.FlushInterval.
 	defer func() {
 		if err := db.Close(); err != nil {
 			log.Printf("closing store: %v", err)
@@ -55,8 +54,7 @@ func run(addr, dataDir string) error {
 	}()
 
 	if skipped > 0 {
-		// Reported rather than hidden: skipped lines mean a previous process
-		// was killed mid-write, and the operator should know.
+		// Skipped lines mean a previous process died mid-write. Say so.
 		log.Printf("replayed with %d unreadable line(s) skipped", skipped)
 	}
 	log.Printf("loaded %d records from %s", db.Count(), dataDir)
@@ -106,12 +104,9 @@ func run(addr, dataDir string) error {
 	return nil
 }
 
-// routes builds the complete HTTP handler.
-//
-// Everything is served from one mux on one port: the dashboard at the root, the
-// demo site under /demo/, the beacon at /b.js, the collection endpoint, and the
-// JSON API. That is what lets the whole tool be one command with no
-// configuration.
+// routes builds the complete HTTP handler. Dashboard, demo site, beacon,
+// collection endpoint, and JSON API all share one mux on one port, which is what
+// lets the whole tool be one command with no configuration.
 func routes(db *store.Store) (http.Handler, error) {
 	mux := http.NewServeMux()
 
@@ -140,13 +135,11 @@ func routes(db *store.Store) (http.Handler, error) {
 		fmt.Fprintln(w, "ok")
 	})
 
-	// The dashboard is last because it owns the root pattern, which matches
-	// anything the more specific patterns above did not.
+	// The dashboard owns the root pattern, so it goes last.
 	//
-	// The pattern carries no method. A "GET /" pattern would be more specific
-	// in method but more general in path than "/v1/collect", which Go's mux
-	// rejects as an ambiguous pair. The file server answers non-GET requests
-	// with 405 itself, so nothing is lost.
+	// No method on the pattern: "GET /" is more specific in method but more
+	// general in path than "/v1/collect", which Go's mux rejects as ambiguous.
+	// The file server answers non-GET with 405 itself.
 	dashHandler, err := dash.Assets()
 	if err != nil {
 		return nil, fmt.Errorf("preparing dashboard: %w", err)
@@ -156,8 +149,7 @@ func routes(db *store.Store) (http.Handler, error) {
 	return mux, nil
 }
 
-// displayAddr turns a listen address into something worth printing. A bare
-// ":8080" is correct but reads badly in a URL.
+// displayAddr turns a listen address into something printable in a URL.
 func displayAddr(addr string) string {
 	if addr == "" {
 		return ":80"

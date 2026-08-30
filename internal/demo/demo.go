@@ -1,12 +1,6 @@
-// Package demo serves the bundled demo site.
-//
-// The demo exists so that a judge, or anyone else evaluating this tool, has
-// something to click within seconds of starting the binary. Each page is broken
-// in one specific, documented way, so the dashboard shows all three status
-// bands rather than a wall of green.
-//
-// The pages are served from the same binary and load the beacon from the same
-// origin, which is the deployment this tool is designed for.
+// Package demo serves the bundled demo site: four pages, each broken in one
+// specific documented way, so the dashboard shows all three status bands within
+// seconds of starting the binary.
 package demo
 
 import (
@@ -24,8 +18,7 @@ const Prefix = "/demo/"
 //go:embed all:site
 var siteFS embed.FS
 
-// Handler returns a handler serving the demo site, expecting to be mounted at
-// [Prefix] with the prefix stripped.
+// Handler returns a handler serving the demo site, to be mounted at [Prefix].
 func Handler() (http.Handler, error) {
 	sub, err := fs.Sub(siteFS, "site")
 	if err != nil {

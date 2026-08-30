@@ -5,21 +5,18 @@ import (
 	"time"
 )
 
-// Range is a half-open time window, [From, To). Either end may be left zero to
-// mean unbounded: a zero From matches everything before To, and a zero To
-// matches everything from From onward. The zero Range matches every record.
+// Range is a half-open time window, [From, To). Either end may be zero to mean
+// unbounded, so the zero Range matches every record.
 //
-// An open end is deliberately not resolved against the wall clock. Doing so
-// would make the same query return different results on two consecutive calls
-// and would silently drop any record whose timestamp ran ahead of the server's
-// clock, which client-supplied timestamps sometimes do.
+// An open end is deliberately not resolved against the wall clock: that would
+// make the same query return different results on consecutive calls, and would
+// drop records timestamped ahead of the server.
 type Range struct {
 	From time.Time
 	To   time.Time
 }
 
-// unbounded marks an open end of a range. It is far enough out that no real
-// measurement can reach it and still comfortably inside time.Time's range.
+// Bounds substituted for an open end of a Range.
 var (
 	beginningOfTime = time.Unix(0, 0).UTC()
 	endOfTime       = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
@@ -69,10 +66,8 @@ func (s *Store) Routes() []string {
 }
 
 // Each calls fn for every record in the range, in ascending time order, and
-// stops early if fn returns false.
-//
-// Records are passed by value and the read lock is held for the duration, so fn
-// must not call back into the Store and should not block.
+// stops early if fn returns false. The read lock is held throughout, so fn must
+// not call back into the Store and should not block.
 func (s *Store) Each(rng Range, fn func(Record) bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -85,8 +80,8 @@ func (s *Store) Each(rng Range, fn func(Record) bool) {
 	}
 }
 
-// EachRoute is [Store.Each] restricted to a single route. It uses the route
-// index, so a query for one route out of hundreds does not scan the others.
+// EachRoute is [Store.Each] restricted to one route, using the route index so
+// the others are not scanned.
 func (s *Store) EachRoute(route string, rng Range, fn func(Record) bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -101,7 +96,7 @@ func (s *Store) EachRoute(route string, rng Range, fn func(Record) bool) {
 			continue
 		}
 		if i >= hi {
-			return // indices are ascending, so nothing later can qualify
+			return // indices ascend, so nothing later qualifies
 		}
 		if !fn(s.records[i]) {
 			return
