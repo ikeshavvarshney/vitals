@@ -136,3 +136,42 @@ for.
   response limit the damage, but they are not a rate limiter. For a
   self-hosted tool on a small site this is an accepted risk, not a solved
   problem.
+
+## HTTP serving
+
+- **`express` + `serve-static`** → `internal/httpx.FileServer` over
+  `net/http` and `io/fs`. Routing is `http.ServeMux`, which since Go 1.22
+  handles method and wildcard patterns. Express gives middleware composition, a
+  router with parameter extraction, view engines, and an ecosystem; this serves
+  a fixed set of embedded files and answers three JSON endpoints, and needs
+  none of that.
+
+- **`compression` / `gorilla/handlers.CompressHandler`** → `compress/gzip`,
+  applied once at startup rather than per request. Because the asset set is
+  embedded and immutable, every file is compressed when the server is
+  constructed and the response is a slice copy. The middleware versions
+  compress per request, which is the right design for dynamic responses and the
+  wrong one here. They also support Brotli and Zstd, which we do not: a browser
+  offering `br` gets the uncompressed body.
+
+- **`etag` / `fresh`** → `crypto/sha256` over the file contents, truncated to
+  128 bits and base64-encoded. Hashing the content rather than stat-ing the
+  file is what makes the tag survive a rebuild: an embedded asset has no
+  meaningful modification time, and two builds of identical bytes should share
+  a cache entry. The `etag` package additionally handles `If-Match` and range
+  requests; we handle `If-None-Match` only, because that is the one a browser
+  sends for a static asset.
+
+- **`mime-types` / the standard `mime` package** → a fixed extension table in
+  `internal/httpx/mime.go`. `mime.TypeByExtension` consults the host's MIME
+  database, which on Windows means the registry, so the same binary can serve
+  JavaScript as `text/plain` on one machine and correctly on another. A
+  hardcoded table of fourteen extensions is wrong the same way everywhere,
+  which is the property that matters. Unknown extensions get
+  `application/octet-stream` rather than being sniffed.
+
+- **`helmet` / `serve-static` traversal guards** → `path.Clean` plus a map
+  lookup. Assets are looked up by key in a map built at startup, never opened
+  from the filesystem by request path, so directory traversal has nothing to
+  traverse to. This is a stronger guarantee than a path-prefix check, and it is
+  a property of the design rather than a check that could be forgotten.
