@@ -71,3 +71,34 @@ for.
   per observation with flat memory. The libraries give exact answers with
   interpolation between order statistics, which ours deliberately does not do:
   interpolating between bucket bounds would imply precision the data lacks.
+
+## Storage
+
+- **`sqlite` / `postgres` + a driver (`mattn/go-sqlite3`, `lib/pq`,
+  `better-sqlite3`)** → `internal/store`, a JSON Lines append log with an
+  in-memory slice sorted by timestamp and a route index. No server to run, no
+  driver to link, no CGO, no schema migration. A real database is better at
+  almost everything else: concurrent writers, partial reads without loading the
+  whole set into memory, crash-consistent transactions, indexes we did not
+  hand-roll, and a query language. Ours holds every record in RAM, so it scales
+  with the memory of one machine and no further.
+
+- **`gorm` / `sqlc` / `prisma` / `knex`** → two functions,
+  `Record.MarshalLine` and `UnmarshalLine`. The schema is one struct with five
+  optional float fields; an ORM would be more code than the thing it maps. An
+  ORM earns its place when the schema changes often and relations are deep, and
+  neither is true here.
+
+- **`json-iterator` / `easyjson` / `ffjson`** → `encoding/json` from the
+  standard library for the on-disk record format. The faster encoders exist
+  because reflection costs real time at high throughput; at one page view per
+  visitor this is not close to the bottleneck. They are genuinely faster, by
+  roughly two to four times on decode, and `easyjson` avoids reflection
+  entirely by generating code. The ingest hot path gets a hand-written parser
+  instead, for a different reason: untrusted input deserves a parser whose
+  failure modes we chose ourselves.
+
+- **`chokidar` / `fsnotify` / `tail`** → `os.ReadDir` plus `bufio.Scanner` on
+  startup. The log is replayed once when the process starts and written only by
+  this process, so nothing needs to watch the filesystem for changes. A watcher
+  would be required if a second writer existed, and by design one does not.
