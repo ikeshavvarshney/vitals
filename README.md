@@ -32,9 +32,11 @@ Open <http://localhost:8080/demo/> and click through a few pages. Then open
 <http://localhost:8080/> for the dashboard. Numbers appear as the demo pages
 report them.
 
-The demo site has pages of deliberately varied performance (a fast one, one
-with a large hero image, and one that shifts layout after load), so the
-scorecard shows all three status bands rather than uniform green.
+The demo site has four pages, each broken in one specific way: a fast control,
+one with a deliberately enormous inline hero image (poor LCP), one that inserts
+unsized content on a timer (poor CLS), and one whose click handler blocks the
+main thread (poor INP). Between them the scorecard shows all three status bands
+rather than uniform green.
 
 ## Instrumenting your own site
 
@@ -149,7 +151,7 @@ normally be here, what replaced it, and where the original is better.
 
 The short version: `express`, `serve-static`, `compression`, `etag`, and `cors`
 became `internal/httpx`. `web-vitals` became a hand-written beacon. React, a
-bundler, and a charting library became [XXX] lines of vanilla JS emitting inline
+bundler, and a charting library became 391 lines of vanilla JS emitting inline
 SVG. A database server and driver became an append log and a sorted slice.
 
 ## Build targets

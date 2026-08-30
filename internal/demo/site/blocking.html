@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blocked interaction | vitals demo</title>
+<link rel="stylesheet" href="/demo/demo.css">
+<script src="/b.js" defer></script>
+</head>
+<body>
+<nav>
+  <strong>demo site</strong>
+  <a href="/demo/">Fast</a>
+  <a href="/demo/heavy.html">Heavy image</a>
+  <a href="/demo/shifty.html">Layout shift</a>
+  <a href="/demo/blocking.html" aria-current="page">Blocked interaction</a>
+  <a href="/">Dashboard</a>
+</nav>
+<main>
+  <h1>A page that blocks when you interact</h1>
+  <p class="lede">The click handler occupies the main thread before it responds.</p>
+
+  <div class="what">
+    <strong>What this page does</strong>
+    Each button runs a synchronous loop before updating the page, so the browser
+    cannot paint the response until it finishes. That delay is what
+    <strong>INP</strong> measures. Note that this tool approximates INP as the
+    longest single event, not the high percentile that real INP reports.
+  </div>
+
+  <p>Click both, in any order. The second one is considerably worse.</p>
+
+  <p>
+    <button type="button" data-block="120">Block for 120ms</button>
+    <button type="button" data-block="600">Block for 600ms</button>
+  </p>
+
+  <p id="result" role="status" aria-live="polite"></p>
+
+  <p>Real pages do this accidentally: a click handler that reflows a large
+  table, parses a big JSON payload, or re-renders a whole component tree
+  synchronously. The fix is to yield to the browser before doing the work, so
+  the interaction can paint first.</p>
+
+</main>
+<footer>
+  <p>Every page here loads <code>/b.js</code>, the 942-byte beacon, from this
+  same server. Measurements are sent once, when you leave the page or switch
+  tabs, so click through a few pages and then open the
+  <a href="/">dashboard</a>.</p>
+</footer>
+<script>
+// Occupy the main thread synchronously. This is the interaction delay that INP
+// is designed to catch.
+var result = document.getElementById('result');
+document.querySelectorAll('[data-block]').forEach(function (button) {
+  button.addEventListener('click', function () {
+    var ms = parseInt(button.getAttribute('data-block'), 10);
+    var end = performance.now() + ms;
+    while (performance.now() < end) { /* deliberately blocking */ }
+    result.textContent = 'Blocked the main thread for ' + ms + 'ms before responding.';
+  });
+});
+</script>
+</body>
+</html>

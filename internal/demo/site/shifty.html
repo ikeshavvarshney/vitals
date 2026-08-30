@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layout shift | vitals demo</title>
+<link rel="stylesheet" href="/demo/demo.css">
+<script src="/b.js" defer></script>
+</head>
+<body>
+<nav>
+  <strong>demo site</strong>
+  <a href="/demo/">Fast</a>
+  <a href="/demo/heavy.html">Heavy image</a>
+  <a href="/demo/shifty.html" aria-current="page">Layout shift</a>
+  <a href="/demo/blocking.html">Blocked interaction</a>
+  <a href="/">Dashboard</a>
+</nav>
+<main>
+  <h1>A page that moves under you</h1>
+  <p class="lede">Content is inserted after load without space reserved for it.</p>
+
+  <div class="what">
+    <strong>What this page does</strong>
+    Three blocks are inserted above this text at 400ms, 900ms, and 1,600ms,
+    with no height reserved. Everything below jumps down each time, which is
+    exactly what <strong>CLS</strong> measures. The shifts are spread out
+    deliberately so they fall into more than one session window.
+  </div>
+
+  <div id="slot"></div>
+
+  <p>A layout shift is only counted when it was not caused by a recent user
+  interaction. These are not: they happen on a timer, with nobody touching the
+  page. That is the difference between a banner appearing because you clicked
+  something, which is fine, and a banner appearing on its own while you are
+  reading, which is not.</p>
+
+  <p>Reserving height for late content, with a fixed size or an aspect ratio,
+  is the fix. This page deliberately does not.</p>
+
+</main>
+<footer>
+  <p>Every page here loads <code>/b.js</code>, the 942-byte beacon, from this
+  same server. Measurements are sent once, when you leave the page or switch
+  tabs, so click through a few pages and then open the
+  <a href="/">dashboard</a>.</p>
+</footer>
+<script>
+// Insert unsized content on a timer. No height is reserved, so everything below
+// is pushed down: a layout shift with no user interaction behind it.
+var slot = document.getElementById('slot');
+[[400, '#b3261e'], [900, '#9a6206'], [1600, '#0a7d4f']].forEach(function (pair) {
+  setTimeout(function () {
+    var box = document.createElement('div');
+    box.style.cssText =
+      'border-left:3px solid ' + pair[1] + ';padding:1rem;margin:1rem 0;' +
+      'min-height:5.5rem;background:rgba(128,128,128,0.08)';
+    box.textContent = 'This block appeared ' + pair[0] + 'ms after load, ' +
+      'pushing everything below it down the page.';
+    slot.appendChild(box);
+  }, pair[0]);
+});
+</script>
+</body>
+</html>

@@ -258,3 +258,22 @@ for.
   `PerformanceObserver` also supports. Axios adds interceptors, automatic JSON
   handling, request cancellation, and consistent error shapes; the four calls
   here share one eight-line wrapper instead.
+
+## Demo site
+
+- **A templating engine (`handlebars`, `ejs`, `html/template`)** → a small
+  Python generator run once at authoring time, whose output is committed. The
+  four demo pages share a navigation and a footer, which is the entire
+  templating requirement. `html/template` is in the standard library and would
+  have been free of dependency cost, but rendering at request time would mean
+  the file a judge reads is not the file the browser receives. Committing the
+  generated HTML keeps those identical. The generator is not part of the build
+  and the binary does not contain it.
+
+- **A placeholder image service or a committed binary asset** → an inline SVG
+  of 2,600 generated shapes. The heavy demo page needs to be genuinely
+  expensive to paint, and pointing at `picsum.photos` or `placehold.co` would
+  put a third-party request in the demo of a tool that argues against
+  third-party requests. Committing a large PNG would work too, but the SVG
+  costs real parse and raster time rather than only download time, which is a
+  better demonstration of what LCP measures.
