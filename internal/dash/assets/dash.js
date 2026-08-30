@@ -855,8 +855,7 @@
       'Do not guess my stack, ask. If the samples are too few to support a conclusion, ' +
       'say that instead of drawing one.');
 
-    return lines.join('
-');
+    return lines.join('\n');
   }
 
   // ------------------------------------------------------------------ load
