@@ -711,3 +711,13 @@ td.meter { width: 32%; min-width: 5rem; }
 }
 .delta.worse { color: var(--poor); font-weight: 600; }
 .delta.better { color: var(--good); font-weight: 600; }
+
+/* A snapshot's dashboard link, inert until the measurement is recorded ----- */
+
+.snap-link.is-pending {
+  cursor: progress;
+  color: var(--ink-3);
+  border-style: dashed;
+  background: var(--panel);
+}
+.snap-link.is-pending:hover { border-color: var(--line); }

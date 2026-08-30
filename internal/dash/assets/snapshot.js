@@ -11,6 +11,7 @@
 (function () {
   var status = document.getElementById('snap-status');
   var table = document.getElementById('snap-table');
+  var open = document.getElementById('snap-open');
 
   var LABELS = {
     lcp: 'Largest Contentful Paint',
@@ -24,6 +25,20 @@
   function fail(message) {
     status.textContent = message;
     status.setAttribute('data-state', 'error');
+    // The dashboard is still worth opening after a failure; it simply will not
+    // hold this measurement.
+    settleLink('Open the dashboard');
+  }
+
+  // settleLink makes the dashboard link usable. Until the POST has finished the
+  // link is inert: following it unloads this page, and an unload cancels a
+  // request that is still in flight, which loses the measurement the visitor
+  // just took. That was the bug this guard exists for.
+  function settleLink(label) {
+    if (!open) return;
+    open.textContent = label;
+    open.classList.remove('is-pending');
+    open.removeAttribute('aria-disabled');
   }
 
   function readPayload() {
@@ -71,14 +86,28 @@
 
   renderTable(payload);
 
+  if (open) {
+    open.addEventListener('click', function (ev) {
+      // Belt and braces with keepalive below: a click that lands in the
+      // millisecond before the response does should not navigate.
+      if (open.getAttribute('aria-disabled') === 'true') ev.preventDefault();
+    });
+  }
+
   // Same-origin, so this is an ordinary request with no CORS involved.
+  //
+  // keepalive lets the request outlive this document, so a visitor who
+  // navigates away mid-flight still has their measurement recorded. The payload
+  // is a few hundred bytes, far inside the 64KB the browser allows.
   fetch('/v1/collect', {
     method: 'POST',
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    keepalive: true
   }).then(function (res) {
     if (!res.ok) throw new Error('server answered ' + res.status);
     status.textContent = 'Recorded ' + payload.u + '.';
     status.removeAttribute('data-state');
+    settleLink('Open the dashboard');
     // The fragment is a one-shot payload. Clearing it means a reload does not
     // silently record the same measurement twice.
     history.replaceState(null, '', location.pathname);
