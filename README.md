@@ -93,6 +93,8 @@ Verified against real sites in Chrome 152. Other browsers are untested.
 - Time series and per-route breakdown, with any route usable as a filter for
   the whole page
 - Export a window as JSON, or as a prompt for an AI agent to read
+- `vitals report` prints the same figures in a terminal, no browser needed
+- Disk usage reported from the files, with optional day-granular retention
 - One binary, one data directory, no external services
 
 ## Documentation
@@ -293,6 +295,7 @@ SVG. A database server and driver became an append log and a sorted slice.
 |---|---|
 | `make` | Build the binary |
 | `make run` | Build and serve dashboard + demo on :8080 |
+| `make report` | Print the last 24 hours in the terminal |
 | `make test` | Run tests |
 | `make race` | Run tests under the race detector, via Docker |
 | `make check` | Fail on any dependency violation |

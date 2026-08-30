@@ -522,7 +522,7 @@ func TestRouteFilterRestrictsEveryEndpoint(t *testing.T) {
 		t.Errorf("series holds %d samples, want 2", samples)
 	}
 
-	var report reportResponse
+	var report Report
 	call(t, a, "/api/report?from=24h&route=%2Fslow", &report)
 	if report.Samples != 2 || report.Route != "/slow" {
 		t.Errorf("report pageViews = %d, route = %q; want 2 and /slow", report.Samples, report.Route)

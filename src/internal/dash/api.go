@@ -339,8 +339,8 @@ func (a *API) handleSeries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
-// groupRow is one row of a breakdown table.
-type groupRow struct {
+// GroupRow is one row of a breakdown table: one route or one device class.
+type GroupRow struct {
 	Key     string   `json:"key"`
 	Value   *float64 `json:"value"`
 	Band    string   `json:"band"`
@@ -355,7 +355,7 @@ type groupResponse struct {
 	Good             float64      `json:"good"`
 	NeedsImprovement float64      `json:"needsImprovement"`
 	Unit             string       `json:"unit"`
-	Rows             []groupRow   `json:"rows"`
+	Rows             []GroupRow   `json:"rows"`
 }
 
 func (a *API) handleRoutes(w http.ResponseWriter, r *http.Request) {
@@ -401,10 +401,10 @@ func (a *API) handleGroup(w http.ResponseWriter, r *http.Request, key func(store
 		Good:             good,
 		NeedsImprovement: needs,
 		Unit:             unitOf(m),
-		Rows:             make([]groupRow, 0, len(groups)),
+		Rows:             make([]GroupRow, 0, len(groups)),
 	}
 	for k, h := range groups {
-		row := groupRow{Key: k, Samples: h.Count()}
+		row := GroupRow{Key: k, Samples: h.Count()}
 		if v, ok := h.Quantile(q.Percentile); ok {
 			row.Value = &v
 			row.Band = stats.BandOf(m, v).String()

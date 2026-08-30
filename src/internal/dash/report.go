@@ -2,7 +2,9 @@ package dash
 
 import (
 	"net/http"
+	"net/url"
 	"sort"
+	"strconv"
 	"time"
 
 	"vitals/src/internal/beacon"
@@ -30,18 +32,18 @@ var reportQuantiles = []struct {
 	{"p95", 0.95},
 }
 
-// distribution is how many samples fell in each Core Web Vitals band. These
+// Distribution is how many samples fell in each Core Web Vitals band. These
 // counts are exact: they are tallied per record during the scan rather than
 // read off the histogram, whose bucket edges do not line up with the
 // thresholds.
-type distribution struct {
+type Distribution struct {
 	Good             uint64 `json:"good"`
 	NeedsImprovement uint64 `json:"needsImprovement"`
 	Poor             uint64 `json:"poor"`
 }
 
-// reportMetric is one metric's full entry in a report.
-type reportMetric struct {
+// ReportMetric is one metric's full entry in a [Report].
+type ReportMetric struct {
 	Metric           stats.Metric       `json:"metric"`
 	Name             string             `json:"name"`
 	Unit             string             `json:"unit"`
@@ -53,19 +55,20 @@ type reportMetric struct {
 	Mean             *float64           `json:"mean"`
 	Good             float64            `json:"good"`
 	NeedsImprovement float64            `json:"needsImprovement"`
-	Distribution     distribution       `json:"distribution"`
+	Distribution     Distribution       `json:"Distribution"`
 	// RelativeError and AbsoluteError state the worst-case error of the
 	// quantiles above: a fraction of the value for millisecond metrics, an
 	// absolute score for CLS.
 	RelativeError float64    `json:"relativeError"`
 	AbsoluteError float64    `json:"absoluteError"`
-	WorstRoutes   []groupRow `json:"worstRoutes"`
-	WorstDevices  []groupRow `json:"worstDevices"`
+	WorstRoutes   []GroupRow `json:"worstRoutes"`
+	WorstDevices  []GroupRow `json:"worstDevices"`
 }
 
-// reportResponse is the payload of GET /api/report: every figure the dashboard
-// shows, for all five metrics at once, in one document that stands on its own.
-type reportResponse struct {
+// Report is every figure the dashboard shows, for all five metrics at once, in
+// one document that stands on its own. It is the payload of GET /api/report and
+// the document the terminal report prints, so the two cannot disagree.
+type Report struct {
 	Generated   time.Time        `json:"generated"`
 	From        time.Time        `json:"from"`
 	To          time.Time        `json:"to"`
@@ -73,7 +76,7 @@ type reportResponse struct {
 	Percentile  float64          `json:"headlinePercentile"`
 	Route       string           `json:"route,omitempty"`
 	Samples     int              `json:"pageViews"`
-	Metrics     []reportMetric   `json:"metrics"`
+	Metrics     []ReportMetric   `json:"metrics"`
 	Ingest      ingest.Counters  `json:"ingest"`
 	Coverage    *coverageSummary `json:"coverage"`
 	BeaconBytes int              `json:"beaconBytes"`
@@ -111,7 +114,44 @@ func (a *API) handleReport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	writeJSON(w, a.report(q))
+}
 
+// ReportOptions select the window a [Report] covers.
+type ReportOptions struct {
+	// Window is how far back to look from now. Zero means 24 hours.
+	Window time.Duration
+	// Percentile is the quantile to rate each metric at, as a whole
+	// percentage: 50, 75, 90, or 95. Zero means 75.
+	Percentile int
+	// Route restricts every figure to one route, matched exactly.
+	Route string
+}
+
+// BuildReport produces a report directly, for callers that are not serving
+// HTTP. The terminal report uses it, so what it prints is the document the API
+// would have returned.
+func (a *API) BuildReport(opts ReportOptions) (Report, error) {
+	values := url.Values{}
+	if opts.Window > 0 {
+		values.Set("from", opts.Window.String())
+	}
+	if opts.Percentile > 0 {
+		values.Set("p", strconv.Itoa(opts.Percentile))
+	}
+	if opts.Route != "" {
+		values.Set("route", opts.Route)
+	}
+
+	q, err := parseQuery(values, a.now())
+	if err != nil {
+		return Report{}, err
+	}
+	return a.report(q), nil
+}
+
+// report assembles the document for an already-parsed query.
+func (a *API) report(q query) Report {
 	agg := newReportAggregator()
 	total := 0
 	a.each(q, q.Range, func(rec store.Record) bool {
@@ -120,7 +160,7 @@ func (a *API) handleReport(w http.ResponseWriter, r *http.Request) {
 		return true
 	})
 
-	writeJSON(w, reportResponse{
+	return Report{
 		Generated:   a.now(),
 		From:        q.Range.From,
 		To:          q.Range.To,
@@ -133,7 +173,7 @@ func (a *API) handleReport(w http.ResponseWriter, r *http.Request) {
 		Coverage:    a.coverage(),
 		BeaconBytes: beacon.Size(),
 		Caveats:     reportCaveats,
-	})
+	}
 }
 
 // reportAggregator accumulates one pass over the store into every figure the
@@ -143,7 +183,7 @@ type reportAggregator struct {
 	overall map[stats.Metric]*stats.Histogram
 	routes  map[stats.Metric]map[string]*stats.Histogram
 	devices map[stats.Metric]map[string]*stats.Histogram
-	bands   map[stats.Metric]*distribution
+	bands   map[stats.Metric]*Distribution
 }
 
 func newReportAggregator() *reportAggregator {
@@ -151,13 +191,13 @@ func newReportAggregator() *reportAggregator {
 		overall: make(map[stats.Metric]*stats.Histogram, len(stats.Metrics)),
 		routes:  make(map[stats.Metric]map[string]*stats.Histogram, len(stats.Metrics)),
 		devices: make(map[stats.Metric]map[string]*stats.Histogram, len(stats.Metrics)),
-		bands:   make(map[stats.Metric]*distribution, len(stats.Metrics)),
+		bands:   make(map[stats.Metric]*Distribution, len(stats.Metrics)),
 	}
 	for _, m := range stats.Metrics {
 		agg.overall[m] = stats.New(stats.LayoutOf(m))
 		agg.routes[m] = make(map[string]*stats.Histogram)
 		agg.devices[m] = make(map[string]*stats.Histogram)
-		agg.bands[m] = &distribution{}
+		agg.bands[m] = &Distribution{}
 	}
 	return agg
 }
@@ -197,14 +237,14 @@ func groupFor(group map[string]*stats.Histogram, key string, m stats.Metric) *st
 
 // metrics renders the accumulated state as the report's metric entries. band is
 // rated at the requested quantile, which is what the dashboard is showing.
-func (agg *reportAggregator) metrics(q float64) []reportMetric {
-	out := make([]reportMetric, 0, len(stats.Metrics))
+func (agg *reportAggregator) metrics(q float64) []ReportMetric {
+	out := make([]ReportMetric, 0, len(stats.Metrics))
 
 	for _, m := range stats.Metrics {
 		h := agg.overall[m]
 		good, needs, _ := stats.Thresholds(m)
 
-		entry := reportMetric{
+		entry := ReportMetric{
 			Metric:           m,
 			Name:             metricNames[m],
 			Unit:             unitOf(m),
@@ -238,10 +278,10 @@ func (agg *reportAggregator) metrics(q float64) []reportMetric {
 }
 
 // topRows returns the slowest groups, worst first, capped at breakdownLimit.
-func topRows(group map[string]*stats.Histogram, m stats.Metric, q float64) []groupRow {
-	rows := make([]groupRow, 0, len(group))
+func topRows(group map[string]*stats.Histogram, m stats.Metric, q float64) []GroupRow {
+	rows := make([]GroupRow, 0, len(group))
 	for k, h := range group {
-		row := groupRow{Key: k, Samples: h.Count()}
+		row := GroupRow{Key: k, Samples: h.Count()}
 		if v, ok := h.Quantile(q); ok {
 			row.Value = &v
 			row.Band = stats.BandOf(m, v).String()

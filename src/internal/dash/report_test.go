@@ -30,7 +30,7 @@ func seedReport(t *testing.T) func(*store.Store) {
 }
 
 // metricOf returns the report entry for m.
-func metricOf(t *testing.T, resp reportResponse, m stats.Metric) reportMetric {
+func metricOf(t *testing.T, resp Report, m stats.Metric) ReportMetric {
 	t.Helper()
 	for _, entry := range resp.Metrics {
 		if entry.Metric == m {
@@ -38,13 +38,13 @@ func metricOf(t *testing.T, resp reportResponse, m stats.Metric) reportMetric {
 		}
 	}
 	t.Fatalf("report has no entry for %q", m)
-	return reportMetric{}
+	return ReportMetric{}
 }
 
 func TestReportEmptyStore(t *testing.T) {
 	a := newTestAPI(t, nil)
 
-	var resp reportResponse
+	var resp Report
 	rec := call(t, a, "/api/report", &resp)
 
 	if rec.Code != http.StatusOK {
@@ -79,7 +79,7 @@ func TestReportEmptyStore(t *testing.T) {
 func TestReportQuantilesAndDistribution(t *testing.T) {
 	a := newTestAPI(t, seedReport(t))
 
-	var resp reportResponse
+	var resp Report
 	call(t, a, "/api/report?from=24h", &resp)
 
 	if resp.Samples != 5 {
@@ -93,12 +93,12 @@ func TestReportQuantilesAndDistribution(t *testing.T) {
 
 	// Band counts are exact, so they can be asserted precisely: 900ms is good,
 	// 3000ms needs improvement, 9000ms is poor.
-	want := distribution{Good: 3, NeedsImprovement: 1, Poor: 1}
+	want := Distribution{Good: 3, NeedsImprovement: 1, Poor: 1}
 	if lcp.Distribution != want {
-		t.Errorf("LCP distribution = %+v, want %+v", lcp.Distribution, want)
+		t.Errorf("LCP Distribution = %+v, want %+v", lcp.Distribution, want)
 	}
 	if got := lcp.Distribution.Good + lcp.Distribution.NeedsImprovement + lcp.Distribution.Poor; got != lcp.Samples {
-		t.Errorf("distribution sums to %d, want %d", got, lcp.Samples)
+		t.Errorf("Distribution sums to %d, want %d", got, lcp.Samples)
 	}
 
 	for _, name := range []string{"p50", "p75", "p90", "p95"} {
@@ -138,7 +138,7 @@ func TestReportQuantilesAndDistribution(t *testing.T) {
 func TestReportBreakdownsAreWorstFirst(t *testing.T) {
 	a := newTestAPI(t, seedReport(t))
 
-	var resp reportResponse
+	var resp Report
 	call(t, a, "/api/report?from=24h", &resp)
 
 	lcp := metricOf(t, resp, stats.LCP)
@@ -174,7 +174,7 @@ func TestReportBreakdownLimit(t *testing.T) {
 		}
 	})
 
-	var resp reportResponse
+	var resp Report
 	call(t, a, "/api/report?from=24h", &resp)
 
 	lcp := metricOf(t, resp, stats.LCP)

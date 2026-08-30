@@ -26,6 +26,14 @@ func main() {
 	log.SetFlags(0)
 	log.SetPrefix("vitals: ")
 
+	// A subcommand runs and exits; anything else starts the server.
+	if handled, err := runSubcommand(os.Args[1:], os.Stdout); handled {
+		if err != nil {
+			exitWith(err)
+		}
+		return
+	}
+
 	addr := flag.String("addr", ":8080", "address to listen on")
 	dataDir := flag.String("data", "data", "directory for measurement storage")
 	retain := flag.Duration("retain", 0, "delete day logs older than this, for example 720h; 0 keeps everything")

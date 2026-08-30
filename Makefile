@@ -14,7 +14,7 @@ endif
 # nothing injects a timestamp or a git SHA. Those three facts are what make the
 # output byte-identical across rebuilds.
 
-.PHONY: all build run test race check beacon compare proof repro clean
+.PHONY: all build run report test race check beacon compare proof repro clean
 
 all: build
 
@@ -25,6 +25,10 @@ build:
 ## run: build, then serve the dashboard and demo site on :8080
 run: build
 	./$(BIN)
+
+## report: print the collected measurements without a browser
+report: build
+	./$(BIN) report -window 24h
 
 ## test: run the full test suite
 test:

@@ -36,6 +36,7 @@ type Options struct {
 // it. Close it to flush buffered records.
 type Server struct {
 	store   *store.Store
+	api     *dash.API
 	handler http.Handler
 	skipped int
 	opts    Options
@@ -70,6 +71,7 @@ func OpenWith(dataDir string, opts Options) (*Server, error) {
 
 	s := &Server{
 		store:   db,
+		api:     api,
 		handler: handler,
 		skipped: skipped,
 		opts:    opts,
@@ -126,6 +128,16 @@ func (s *Server) Records() int { return s.store.Count() }
 // the data directory. A non-zero count means a previous process died
 // mid-write, and is worth surfacing rather than swallowing.
 func (s *Server) Skipped() int { return s.skipped }
+
+// ReportOptions selects the window a report covers.
+type ReportOptions = dash.ReportOptions
+
+// Report is the full measurement document for a window.
+type Report = dash.Report
+
+// Report builds the same document GET /api/report returns, without going
+// through HTTP. The terminal report uses it.
+func (s *Server) Report(opts ReportOptions) (Report, error) { return s.api.BuildReport(opts) }
 
 // Usage reports what the store occupies on disk.
 func (s *Server) Usage() (store.Usage, error) { return s.store.Usage() }
