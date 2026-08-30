@@ -52,6 +52,36 @@ Locally that origin is `http://localhost:8080`. The script collects LCP, CLS,
 INP, TTFB, and FCP, buffers them, and sends one small payload when the page is
 hidden. It sets no cookie and no persistent identifier.
 
+## Measuring a page you do not control
+
+The beacon requires access to a site's HTML, which you will not have for a site
+that is not yours. For those, the dashboard offers a bookmarklet.
+
+Drag **vitals snapshot** from the dashboard to your bookmarks bar, open any
+page, and click it. A small panel reports the page's vitals as the browser sees
+them, and **Send to vitals** stores the measurement under a route named after
+the page's host.
+
+Nothing needs configuring. The bookmarklet cannot post to this server from the
+page it measured, because Chrome blocks requests from a public page to a
+loopback address, so it hands the payload to `/snapshot.html` through the URL
+fragment and that page performs the same-origin POST. Fragments are never sent
+to a server, so the measurement does not pass through anyone's access log on
+the way.
+
+What this is and is not:
+
+- It is a real measurement. The numbers come from `PerformanceObserver` in your
+  browser on the real page, replayed from its buffer rather than re-measured.
+- It is **a sample of one**, taken on your machine and your connection. It is
+  not that site's field data and it is not comparable to a `web.dev` score.
+- INP only sees interactions that happen after the bookmarklet runs. A missing
+  INP means unmeasured, not fast.
+- LCP is final once a page has been interacted with, so click the bookmarklet
+  before you click anything else on the page.
+
+Verified against real sites in Chrome 152. Other browsers are untested.
+
 ## What it does
 
 - Collects the five Core Web Vitals with `PerformanceObserver`

@@ -122,6 +122,8 @@ func TestEveryRouteIsReachable(t *testing.T) {
 		{"/", "text/html; charset=utf-8", "<title>vitals</title>"},
 		{"/dash.css", "text/css; charset=utf-8", "--good"},
 		{"/dash.js", "text/javascript; charset=utf-8", "renderScorecard"},
+		{"/snapshot.html", "text/html; charset=utf-8", "Snapshot receiver"},
+		{"/snapshot.js", "text/javascript; charset=utf-8", "/v1/collect"},
 		{beacon.Path, "text/javascript; charset=utf-8", "PerformanceObserver"},
 		{"/beacon.src.js", "text/javascript; charset=utf-8", "vitals beacon"},
 		{"/demo/", "text/html; charset=utf-8", "A fast page"},

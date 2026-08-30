@@ -159,7 +159,67 @@ clock, which the server validates but does not use for storage. `w` is
 
 Most of the size difference against `web-vitals` is these features, not padding.
 
-## 8. Verification status
+## 8. The bookmarklet, for pages you do not control
+
+The beacon is installed by a site owner. For a site that is not yours, the
+dashboard offers a bookmarklet that measures a single visit.
+
+It is a separate program from the beacon, defined as `snapshotProgram` in
+`internal/dash/assets/dash.js` and serialised into a `javascript:` URL with
+`Function.prototype.toString`. There is one copy of it, so it does not
+introduce the hand-sync problem described in section 2. It observes the same
+five entry types and computes CLS with the same session-window arithmetic; a
+test asserts both, because a divergence would only be visible on someone
+else's page.
+
+### Why it does not simply post the payload
+
+```mermaid
+flowchart LR
+  A[Bookmarklet runs on example.com] -->|POST to 127.0.0.1| B[Blocked]
+  A -->|top-level navigation with the payload in the fragment| C[/snapshot.html on the vitals origin/]
+  C -->|same-origin POST| D[/v1/collect]
+  B -.->|Local Network Access permission denied| A
+```
+
+Chrome refuses a request from a public page to a loopback address unless the
+page holds a Local Network Access permission, which it will not have:
+
+```
+Access to script at 'http://127.0.0.1:8142/snap.js' from origin
+'https://www.amazon.com' has been blocked by CORS policy: Permission was
+denied for this request to access the `loopback` address space.
+```
+
+A top-level navigation is not a subresource request and is not subject to that
+gate. The bookmarklet therefore opens `/snapshot.html` with the payload in the
+URL fragment, and that page, being on the vitals origin, performs an ordinary
+same-origin POST. The fragment is never transmitted to a server by any browser,
+so the measurement does not appear in an access log en route. The receiver
+clears the fragment after recording, so a reload does not store it twice.
+
+This design also means the collection endpoint needs no CORS support at all.
+
+### What a snapshot is worth
+
+| | |
+|---|---|
+| Measurement | Real. The browser's own entries for the real page load, replayed from its buffer with `buffered: true`. |
+| Sample size | One visit, from your machine on your connection. Not the site's field data. |
+| INP | Only interactions after the bookmarklet runs. Missing INP means unmeasured, not fast. |
+| LCP | Final once the page has been interacted with, so run the bookmarklet before clicking anything. |
+| Route | `host + path`, so a measured third-party page is distinguishable from your own. |
+
+### Verification
+
+Driven end to end in Chrome 152 against `https://www.amazon.com/`: the
+bookmarklet was read from the dashboard as a user would drag it, executed in
+the page, its send button clicked with a dispatched mouse event, and the
+resulting record read back from the API under the route `/www.amazon.com/`.
+Content Security Policy on that site logged a report-only violation for the
+earlier script-loading design and does not affect the current one.
+
+## 9. Verification status
 
 The beacon has been driven end to end in **Chrome 152** over the DevTools
 Protocol: all four demo pages loaded with no console errors, uncaught

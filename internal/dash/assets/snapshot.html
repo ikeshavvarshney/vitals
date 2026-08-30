@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vitals snapshot</title>
+<link rel="stylesheet" href="/dash.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%23067a52'/></svg>">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="bar">
+  <div class="bar-inner">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <h1>vitals</h1>
+      <span class="brand-note">Snapshot receiver</span>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <section aria-labelledby="receiver-heading">
+    <div class="section-head">
+      <h2 id="receiver-heading">Snapshot</h2>
+      <p class="section-note">Recorded from a page measured with the bookmarklet</p>
+    </div>
+
+    <div class="panel snap">
+      <p class="status" id="snap-status" role="status" aria-live="polite">Reading the snapshot.</p>
+      <table id="snap-table"><caption class="visually-hidden">Metrics in this snapshot</caption></table>
+      <p class="snap-caveat">
+        The measurement was taken in your browser, on the page you were viewing.
+        It is stored exactly like a beacon report, under a route named after the
+        page's host. Nothing about the snapshot was sent anywhere except this
+        server: the payload travelled in the URL fragment, which browsers never
+        transmit to a server.
+      </p>
+      <p><a class="snap-link" href="/">Open the dashboard</a></p>
+    </div>
+  </section>
+</main>
+
+<script src="/snapshot.js"></script>
+</body>
+</html>

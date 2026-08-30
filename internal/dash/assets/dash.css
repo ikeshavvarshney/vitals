@@ -379,6 +379,9 @@ button:active { background: var(--line-soft); }
   font-size: 0.72rem;
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
+  /* "needs improvement" is a wide badge: the sample count must not wrap
+     under it and grow the card. */
+  white-space: nowrap;
 }
 
 .badge {
@@ -386,8 +389,11 @@ button:active { background: var(--line-soft); }
   font-size: 0.62rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 0.12rem 0.42rem;
+  letter-spacing: 0.05em;
+  padding: 0.12rem 0.38rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   border-radius: 4px;
   white-space: nowrap;
 }
@@ -548,4 +554,46 @@ td.meter { width: 32%; min-width: 5rem; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
+}
+
+/* Bookmarklet panel. */
+.snap { padding: var(--pad); }
+.snap-lead { margin: 0 0 0.9rem; max-width: 62ch; color: var(--ink-2); }
+.snap-link {
+  display: inline-block;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel-alt);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-decoration: none;
+  cursor: grab;
+}
+.snap-link:hover { border-color: var(--ink-3); }
+.snap-steps {
+  margin: 1rem 0 0;
+  padding-left: 1.15rem;
+  max-width: 68ch;
+  color: var(--ink-2);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+.snap-steps li { margin-bottom: 0.35rem; }
+.snap-steps code {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  background: var(--panel-alt);
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  padding: 0 0.3rem;
+}
+.snap-caveat {
+  margin: 1rem 0 0;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line-soft);
+  max-width: 68ch;
+  font-size: 0.82rem;
+  color: var(--ink-3);
 }

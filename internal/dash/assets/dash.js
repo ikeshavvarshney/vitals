@@ -20,7 +20,8 @@
     counters: document.getElementById('counters'),
     windowSel: document.getElementById('window'),
     metricGroup: document.getElementById('metric-group'),
-    refresh: document.getElementById('refresh')
+    refresh: document.getElementById('refresh'),
+    snapLink: document.getElementById('snap-link')
   };
 
   var METRICS = [
@@ -414,7 +415,7 @@
         h('td', { class: 'key', text: row.key || '(unknown)' }),
         h('td', {
           class: 'num',
-          text: value === null ? '—' : value + unitLabel(row.p75, data.unit)
+          text: value === null ? '-' : value + unitLabel(row.p75, data.unit)
         }),
         h('td', { class: 'meter' }, [
           h('div', {
@@ -477,6 +478,111 @@
     document.getElementById('ledger-beacon').textContent = formatBytes(bytes);
   }
 
+  // ---------------------------------------------------------- bookmarklet
+
+  // snapshotProgram is the bookmarklet. It is written as an ordinary function
+  // and serialised with toString(), so there is one copy of it and it stays
+  // readable rather than becoming a hand-escaped string literal.
+  //
+  // It cannot load a script from this server and it cannot post to it: Chrome
+  // blocks requests from a public page to a loopback address unless the page
+  // holds a Local Network Access permission it will never be granted. A
+  // top-level navigation is exempt, so the program hands its payload to
+  // /snapshot.html through the URL fragment, and that page does the POST.
+  function snapshotProgram(base) {
+    var m = {};
+    var observe = function (type, cb, threshold) {
+      try {
+        new PerformanceObserver(cb).observe({
+          type: type, buffered: true, durationThreshold: threshold
+        });
+      } catch (e) { /* entry type unsupported: metric simply not reported */ }
+    };
+
+    observe('navigation', function (l) {
+      var e = l.getEntries()[0];
+      if (e) m.ttfb = e.responseStart;
+    });
+    observe('paint', function (l) {
+      l.getEntries().forEach(function (e) {
+        if (e.name === 'first-contentful-paint') m.fcp = e.startTime;
+      });
+    });
+    observe('largest-contentful-paint', function (l) {
+      var e = l.getEntries();
+      m.lcp = e[e.length - 1].startTime;
+    });
+
+    var wv = 0, ws = 0, wl = 0, worst = 0;
+    observe('layout-shift', function (l) {
+      l.getEntries().forEach(function (e) {
+        if (e.hadRecentInput) return;
+        if (wv && e.startTime - wl < 1000 && e.startTime - ws < 5000) {
+          wv += e.value; wl = e.startTime;
+        } else {
+          wv = e.value; ws = wl = e.startTime;
+        }
+        if (wv > worst) { worst = wv; m.cls = worst; }
+      });
+    });
+    observe('event', function (l) {
+      l.getEntries().forEach(function (e) {
+        if (e.duration > (m.inp || 0)) m.inp = e.duration;
+      });
+    }, 16);
+
+    var panel = document.createElement('div');
+    panel.setAttribute('role', 'status');
+    panel.style.cssText = 'position:fixed;z-index:2147483647;right:12px;bottom:12px;' +
+      'width:230px;padding:10px 12px;border-radius:8px;background:#14161c;color:#e7e9ee;' +
+      'font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;box-shadow:0 6px 24px rgba(0,0,0,.35)';
+    var readout = document.createElement('div');
+    var send = document.createElement('button');
+    send.textContent = 'Send to vitals';
+    send.style.cssText = 'margin-top:8px;width:100%;padding:6px;border:0;border-radius:6px;' +
+      'background:#067a52;color:#fff;font:inherit;font-weight:700;cursor:pointer';
+    panel.appendChild(readout);
+    panel.appendChild(send);
+    document.body.appendChild(panel);
+
+    var keys = ['lcp', 'inp', 'cls', 'fcp', 'ttfb'];
+    var timer = setInterval(paint, 250);
+    paint();
+
+    function paint() {
+      readout.textContent = keys.map(function (k) {
+        var v = m[k];
+        if (v === undefined) return k.toUpperCase() + ' -';
+        return k.toUpperCase() + ' ' + (k === 'cls' ? v.toFixed(3) : Math.round(v) + 'ms');
+      }).join('  ');
+    }
+
+    send.addEventListener('click', function () {
+      clearInterval(timer);
+      var body = encodeURIComponent(JSON.stringify({
+        u: location.host + location.pathname,
+        t: Date.now(),
+        w: innerWidth,
+        m: m
+      }));
+      panel.remove();
+      window.open(base + '/snapshot.html#' + body, '_blank');
+    });
+  }
+
+  function renderBookmarklet() {
+    if (!el.snapLink) return;
+    el.snapLink.href =
+      'javascript:(' + snapshotProgram.toString() + ')(' +
+      JSON.stringify(location.origin) + ')';
+    el.snapLink.addEventListener('click', function (ev) {
+      // Running it here would measure the dashboard, which is not the point.
+      ev.preventDefault();
+      el.snapLink.textContent = 'Drag me to the bookmarks bar';
+      setTimeout(function () { el.snapLink.textContent = 'vitals snapshot'; }, 1800);
+    });
+  }
+
   // ------------------------------------------------------------------ load
 
   function load() {
@@ -513,5 +619,6 @@
 
   buildMetricSelector();
   renderLedger();
+  renderBookmarklet();
   load();
 })();
