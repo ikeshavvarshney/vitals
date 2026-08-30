@@ -1,0 +1,6 @@
+# Keep line endings stable across platforms so the repository, the embedded
+# assets, and the reproducible build hashes do not depend on who checked out.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary

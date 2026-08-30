@@ -1,0 +1,10 @@
+# go.mod
+module vitals
+
+go 1.23
+
+# go list -m all
+vitals
+
+# go version
+go version go1.26.3 windows/amd64
