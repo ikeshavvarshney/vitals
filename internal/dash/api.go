@@ -42,6 +42,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/series", a.handleSeries)
 	mux.HandleFunc("GET /api/routes", a.handleRoutes)
 	mux.HandleFunc("GET /api/devices", a.handleDevices)
+	mux.HandleFunc("GET /api/report", a.handleReport)
 }
 
 // metricSummary is one metric's headline figure.

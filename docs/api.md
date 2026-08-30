@@ -15,6 +15,7 @@ pagination.
 | `GET` | `/api/series` | One metric bucketed over time |
 | `GET` | `/api/routes` | One metric broken down by route |
 | `GET` | `/api/devices` | One metric broken down by device class |
+| `GET` | `/api/report` | Every metric at once, with quantiles, band counts, and breakdowns |
 | `GET` | `/b.js` | The minified beacon |
 | `GET` | `/beacon.src.js` | The readable beacon source |
 | `GET` | `/demo/` | The bundled demo site |
@@ -31,6 +32,7 @@ flowchart LR
         series["GET /api/series"]
         routes["GET /api/routes"]
         devices["GET /api/devices"]
+        report["GET /api/report"]
     end
     subgraph assets["Static"]
         bjs["GET /b.js"]
@@ -45,6 +47,7 @@ flowchart LR
     store --> series
     store --> routes
     store --> devices
+    store --> report
 ```
 
 ## 2. Collection
@@ -194,7 +197,72 @@ Rows are sorted worst first, since the purpose of a breakdown is to identify the
 slowest page. Ties are broken by key so ordering is stable between requests. Rows
 without a value sort last.
 
-## 7. Accuracy
+## 7. `GET /api/report`
+
+One document holding every figure the dashboard shows, for all five metrics at
+once, so a window can be copied out of the browser or fetched by a script
+without issuing five requests and stitching them together. The dashboard's
+export buttons read this endpoint.
+
+It takes the same `from` and `to` parameters as the rest of the read path, and
+ignores `metric` and `n`.
+
+```json
+{
+  "generated": "2026-08-30T12:00:00Z",
+  "from": "2026-08-29T12:00:00Z",
+  "to": "2026-08-30T12:00:00Z",
+  "windowHours": 24,
+  "headlinePercentile": 0.75,
+  "pageViews": 1028,
+  "metrics": [
+    {
+      "metric": "lcp",
+      "name": "Largest Contentful Paint",
+      "unit": "ms",
+      "samples": 1012,
+      "band": "needs-improvement",
+      "quantiles": { "p50": 1834.2, "p75": 3210.5, "p90": 5800, "p95": 6100 },
+      "min": 402,
+      "max": 9800,
+      "mean": 2233.9,
+      "good": 2500,
+      "needsImprovement": 4000,
+      "distribution": { "good": 701, "needsImprovement": 210, "poor": 101 },
+      "relativeError": 0.0488,
+      "absoluteError": 0,
+      "worstRoutes": [
+        { "key": "/pricing", "p75": 6100, "band": "poor", "samples": 88 }
+      ],
+      "worstDevices": [
+        { "key": "mobile", "p75": 4900, "band": "poor", "samples": 402 }
+      ]
+    }
+  ],
+  "ingest": { "accepted": 1028, "malformed": 0, "tooLarge": 0, "storeErrors": 0 },
+  "coverage": { "total": 4102, "oldest": "2026-08-24T09:11:02Z", "newest": "2026-08-30T11:58:44Z" },
+  "beaconBytes": 942,
+  "caveats": ["Percentiles are approximate. ..."]
+}
+```
+
+Notes on the fields that are not in the other endpoints:
+
+- `distribution` counts are **exact**. They are tallied per record against the
+  published thresholds during the scan, not read off histogram buckets, whose
+  edges do not line up with a threshold. Everything in `quantiles` is
+  approximate in the usual way.
+- `worstRoutes` and `worstDevices` are capped at **five rows each**, worst
+  first. A site with a thousand routes must not produce a thousand rows in a
+  document meant to be read or pasted into a context window. The cap affects
+  only these lists; `samples` and `distribution` still count every record.
+- `min`, `max`, `mean`, and the `quantiles` map are absent when a metric has no
+  samples in the window, and `band` is an empty string. An absent metric was
+  not measured, which is not the same as being fast.
+- `caveats` restates the dashboard's footnotes inside the payload, so a report
+  that travels somewhere else takes its disclosures with it.
+
+## 8. Accuracy
 
 Every `p75` in this API is an approximation read off histogram buckets, not an
 exact order statistic. For millisecond metrics the error is bounded at **4.9%
