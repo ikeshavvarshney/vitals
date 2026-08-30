@@ -53,3 +53,21 @@ for.
   features that real services need, and we have none of those needs. If the
   ingest path ever needed per-request logging, `log/slog` is also stdlib and
   would be the next step, still with no dependency.
+
+## Statistics
+
+- **`hdrhistogram` / `t-digest` / `prom-client` histograms** → `internal/stats`,
+  a fixed-bucket histogram with geometric boundaries for durations and linear
+  boundaries for CLS. Around 200 lines over `math`. The published percentile is
+  the geometric mean of its bucket, which bounds the relative error at
+  sqrt(1.1)-1, about 4.9%. HdrHistogram is genuinely better: it auto-sizes,
+  supports configurable significant digits, records a much wider dynamic range,
+  and has a compact wire encoding for shipping histograms between processes. We
+  need one fixed range and one process.
+
+- **`simple-statistics` / `d3-array` quantile / `gonum/stat`** → a cumulative
+  count walk in `Histogram.Quantile`. Exact percentiles require retaining and
+  sorting every sample, which is O(n log n) and unbounded memory; this is O(1)
+  per observation with flat memory. The libraries give exact answers with
+  interpolation between order statistics, which ours deliberately does not do:
+  interpolating between bucket bounds would imply precision the data lacks.
