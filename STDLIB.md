@@ -215,3 +215,46 @@ for.
   bundle. The beacon is one IIFE in one file with no imports. Bundlers earn
   their place with module graphs, tree shaking, and code splitting; a
   single-file script has none of those problems.
+
+## Dashboard
+
+- **React / Vue / Svelte** → about 380 lines of vanilla JavaScript in
+  `dash.js`. The dashboard renders four API responses into a scorecard, a
+  chart, two tables, and a counter row, and re-renders the whole thing on each
+  refresh. There is no shared mutable state and no partial update, so the thing
+  a framework is for does not arise. A framework earns its place when state is
+  complex and updates are fine-grained; here the entire page is a pure function
+  of one fetch.
+
+- **Chart.js / D3 / Recharts / ApexCharts** → about 120 lines building inline
+  SVG with `createElementNS`. A `polyline` for the series, `line` for axes,
+  grid, and thresholds, `circle` for points, `text` for ticks. Gaps in the data
+  break the polyline instead of interpolating, which is a deliberate difference
+  from most charting defaults: an interpolated line across a window with no
+  page views would be inventing data. What the libraries do that this does not:
+  zoom and pan, animated transitions, automatic tick selection, stacked and log
+  scales, and legends. D3's axis and scale modules alone are more capable than
+  everything here.
+
+- **`webpack` / `vite` / `parcel` / any bundler or transpiler** → no build
+  step at all. Three files are served exactly as they are written, embedded in
+  the binary with `//go:embed`. The cost is real: no minification, no module
+  system, no tree shaking, and the source is what ships. At this size that is a
+  fair trade, and it means the file a judge reads is the file the browser runs.
+
+- **`normalize.css` / Tailwind / any CSS framework** → about 340 lines of hand
+  written CSS with custom properties for the palette. Tailwind would need a
+  build step to be anything other than enormous. The status colours are the
+  only saturated values on the page, and they come from the Core Web Vitals
+  banding rather than from a design system.
+
+- **`date-fns` / `moment` / `dayjs`** → `Date` and `Intl` methods already in
+  the browser, plus `time` on the server. The dashboard formats a clock time
+  and a byte count; that is two small functions. These libraries are genuinely
+  better at timezone arithmetic, relative phrasing, and locale-aware formats,
+  none of which this needs.
+
+- **`axios` / `superagent`** → `fetch`, which every browser that supports
+  `PerformanceObserver` also supports. Axios adds interceptors, automatic JSON
+  handling, request cancellation, and consistent error shapes; the four calls
+  here share one eight-line wrapper instead.

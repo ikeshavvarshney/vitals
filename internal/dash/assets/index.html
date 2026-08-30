@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vitals</title>
+<link rel="stylesheet" href="/dash.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#9679;</text></svg>">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="bar">
+  <div class="brand">
+    <span class="dot" aria-hidden="true"></span>
+    <h1>vitals</h1>
+  </div>
+
+  <dl class="ledger" aria-label="This page's own weight">
+    <div><dt>beacon</dt><dd id="ledger-beacon">&mdash;</dd></div>
+    <div><dt>this page</dt><dd id="ledger-page">&mdash;</dd></div>
+    <div><dt>requests</dt><dd id="ledger-requests">&mdash;</dd></div>
+  </dl>
+</header>
+
+<main id="main">
+  <form class="controls" id="controls">
+    <label>
+      <span>Window</span>
+      <select id="window" name="window">
+        <option value="1h">Last hour</option>
+        <option value="6h">Last 6 hours</option>
+        <option value="24h" selected>Last 24 hours</option>
+        <option value="168h">Last 7 days</option>
+        <option value="720h">Last 30 days</option>
+      </select>
+    </label>
+    <label>
+      <span>Chart metric</span>
+      <select id="metric" name="metric">
+        <option value="lcp" selected>LCP</option>
+        <option value="inp">INP</option>
+        <option value="cls">CLS</option>
+        <option value="fcp">FCP</option>
+        <option value="ttfb">TTFB</option>
+      </select>
+    </label>
+    <button type="button" id="refresh">Refresh</button>
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+  </form>
+
+  <section aria-labelledby="scorecard-heading">
+    <h2 id="scorecard-heading">Scorecard <span class="sub">75th percentile</span></h2>
+    <div class="scorecard" id="scorecard"></div>
+  </section>
+
+  <section aria-labelledby="series-heading">
+    <h2 id="series-heading">Over time <span class="sub" id="series-sub"></span></h2>
+    <figure class="chart">
+      <div id="series"></div>
+      <figcaption id="series-caption"></figcaption>
+    </figure>
+  </section>
+
+  <div class="split">
+    <section aria-labelledby="routes-heading">
+      <h2 id="routes-heading">By route <span class="sub">worst first</span></h2>
+      <div class="table-wrap"><table id="routes"><caption class="visually-hidden">75th percentile by route</caption></table></div>
+    </section>
+
+    <section aria-labelledby="devices-heading">
+      <h2 id="devices-heading">By device <span class="sub">from viewport width</span></h2>
+      <div class="table-wrap"><table id="devices"><caption class="visually-hidden">75th percentile by device class</caption></table></div>
+    </section>
+  </div>
+
+  <section aria-labelledby="ingest-heading">
+    <h2 id="ingest-heading">Ingest</h2>
+    <dl class="counters" id="counters"></dl>
+  </section>
+
+  <footer class="notes">
+    <p><strong>Percentiles are approximate.</strong> Values are bucketed; the
+    millisecond metrics carry up to 4.9% relative error and CLS 0.0025 absolute.</p>
+    <p><strong>INP is approximated.</strong> This is the maximum duration of a
+    single event over 16ms, not the high percentile of interaction latency that
+    real INP reports. It is pessimistic in the tail.</p>
+    <p><strong>Buffered writes.</strong> Up to 2 seconds of samples are lost if
+    the server is killed.</p>
+  </footer>
+</main>
+
+<script src="/dash.js"></script>
+</body>
+</html>
