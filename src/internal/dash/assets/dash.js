@@ -18,6 +18,7 @@
     routes: document.getElementById('routes'),
     devices: document.getElementById('devices'),
     counters: document.getElementById('counters'),
+    storage: document.getElementById('storage'),
     windowSel: document.getElementById('window'),
     metricGroup: document.getElementById('metric-group'),
     pctGroup: document.getElementById('pct-group'),
@@ -575,6 +576,44 @@
     });
   }
 
+  // --------------------------------------------------------------- storage
+
+  // The tool reports what it costs on disk, measured from the files rather
+  // than estimated, for the same reason it reports its own page weight.
+  function renderStorage(data) {
+    clear(el.storage);
+    var c = data.coverage;
+    if (!c) return;
+
+    var days = c.files === 1 ? '1 day log' : c.files.toLocaleString() + ' day logs';
+    var perRecord = c.bytesPerRecord
+      ? c.bytesPerRecord.toFixed(0) + ' B'
+      : '-';
+    var retention = c.retentionDays
+      ? (c.retentionDays >= 1
+          ? Math.round(c.retentionDays) + ' days'
+          : Math.round(c.retentionDays * 24) + ' hours')
+      : 'kept forever';
+
+    var span = '-';
+    if (c.oldest && c.newest) {
+      span = formatDateTime(c.oldest) + ' to ' + formatDateTime(c.newest);
+    }
+
+    [
+      ['On disk', formatBytes(c.bytes)],
+      ['Files', days],
+      ['Per record', perRecord],
+      ['Retention', retention],
+      ['Span', span]
+    ].forEach(function (item) {
+      el.storage.appendChild(h('div', {}, [
+        h('dt', { text: item[0] }),
+        h('dd', { text: item[1] })
+      ]));
+    });
+  }
+
   // ---------------------------------------------------------- weight ledger
 
   // The tool reports its own weight, measured from this page's resource
@@ -880,6 +919,7 @@
     ]).then(function (r) {
       renderScorecard(r[0]);
       renderCounters(r[0]);
+      renderStorage(r[0]);
       renderBeaconSize(r[0].beaconBytes);
       renderSeries(r[1]);
       // The route table stays pickable while filtered, so a wrong pick is one

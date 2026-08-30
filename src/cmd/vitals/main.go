@@ -28,16 +28,20 @@ func main() {
 
 	addr := flag.String("addr", ":8080", "address to listen on")
 	dataDir := flag.String("data", "data", "directory for measurement storage")
+	retain := flag.Duration("retain", 0, "delete day logs older than this, for example 720h; 0 keeps everything")
 	flag.Parse()
 
-	if err := run(*addr, *dataDir); err != nil {
+	if err := run(*addr, *dataDir, *retain); err != nil {
 		log.Fatal(err)
 	}
 }
 
 // run wires the server together and blocks until it is asked to stop.
-func run(addr, dataDir string) error {
-	app, err := server.Open(dataDir)
+func run(addr, dataDir string, retain time.Duration) error {
+	app, err := server.OpenWith(dataDir, server.Options{
+		Retention: retain,
+		Logf:      log.Printf,
+	})
 	if err != nil {
 		return err
 	}
@@ -54,6 +58,15 @@ func run(addr, dataDir string) error {
 		log.Printf("replayed with %d unreadable line(s) skipped", app.Skipped())
 	}
 	log.Printf("loaded %d records from %s", app.Records(), dataDir)
+	if u, err := app.Usage(); err != nil {
+		log.Printf("reading storage usage: %v", err)
+	} else {
+		log.Printf("storage   %d day log(s), %s, %.0f bytes per record",
+			u.Files, formatBytes(u.Bytes), u.BytesPerRecord())
+	}
+	if retain > 0 {
+		log.Printf("retention  day logs older than %s are removed", retain)
+	}
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -93,6 +106,18 @@ func run(addr, dataDir string) error {
 		return fmt.Errorf("shutting down: %w", err)
 	}
 	return nil
+}
+
+// formatBytes renders a size the way the dashboard does, so the two agree.
+func formatBytes(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
 }
 
 // displayAddr turns a listen address into something printable in a URL.

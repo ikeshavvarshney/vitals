@@ -11,6 +11,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"vitals/src/internal/beacon"
 	"vitals/src/internal/dash"
@@ -19,12 +20,26 @@ import (
 	"vitals/src/internal/store"
 )
 
+// Options configure a server. The zero value is the default: keep everything,
+// forever.
+type Options struct {
+	// Retention is how long a day log is kept. Zero keeps every day. A
+	// measurement is never deleted individually: whole days expire together,
+	// because a partially rewritten log is a corrupt log.
+	Retention time.Duration
+	// Logf receives operational notes, such as how many day logs a prune
+	// removed. Nil discards them.
+	Logf func(format string, args ...any)
+}
+
 // Server is a running instance's state: the record store and the handler over
 // it. Close it to flush buffered records.
 type Server struct {
 	store   *store.Store
 	handler http.Handler
 	skipped int
+	opts    Options
+	stop    chan struct{}
 }
 
 // Open reads any existing measurements in dataDir, creating it if needed, and
@@ -32,17 +47,73 @@ type Server struct {
 // write buffer; killing the process instead loses up to
 // [vitals/src/internal/store.FlushInterval] of records.
 func Open(dataDir string) (*Server, error) {
+	return OpenWith(dataDir, Options{})
+}
+
+// OpenWith is [Open] with explicit options.
+func OpenWith(dataDir string, opts Options) (*Server, error) {
+	if opts.Logf == nil {
+		opts.Logf = func(string, ...any) {}
+	}
+
 	db, skipped, err := store.Open(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("opening store: %w", err)
 	}
 
-	handler, err := routes(db)
+	handler, api, err := routes(db)
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
-	return &Server{store: db, handler: handler, skipped: skipped}, nil
+	api.SetRetention(opts.Retention)
+
+	s := &Server{
+		store:   db,
+		handler: handler,
+		skipped: skipped,
+		opts:    opts,
+		stop:    make(chan struct{}),
+	}
+
+	if opts.Retention > 0 {
+		s.prune()
+		go s.pruneLoop()
+	}
+	return s, nil
+}
+
+// pruneInterval is how often retention is enforced while running. Expiry is
+// day-granular, so checking more often than hourly would only burn a directory
+// read.
+const pruneInterval = time.Hour
+
+// pruneLoop enforces retention until the server is closed.
+func (s *Server) pruneLoop() {
+	t := time.NewTicker(pruneInterval)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-t.C:
+			s.prune()
+		case <-s.stop:
+			return
+		}
+	}
+}
+
+// prune drops day logs older than the retention window.
+func (s *Server) prune() {
+	files, records, err := s.store.Prune(time.Now().UTC().Add(-s.opts.Retention))
+	if err != nil {
+		s.opts.Logf("retention: %v", err)
+		return
+	}
+	if files > 0 {
+		s.opts.Logf("retention: removed %d day log(s), %d record(s) older than %s",
+			files, records, s.opts.Retention)
+	}
 }
 
 // Handler returns the HTTP handler serving every route.
@@ -56,13 +127,23 @@ func (s *Server) Records() int { return s.store.Count() }
 // mid-write, and is worth surfacing rather than swallowing.
 func (s *Server) Skipped() int { return s.skipped }
 
-// Close flushes buffered records and releases the data files.
-func (s *Server) Close() error { return s.store.Close() }
+// Usage reports what the store occupies on disk.
+func (s *Server) Usage() (store.Usage, error) { return s.store.Usage() }
+
+// Close stops retention, flushes buffered records, and releases the data files.
+func (s *Server) Close() error {
+	select {
+	case <-s.stop:
+	default:
+		close(s.stop)
+	}
+	return s.store.Close()
+}
 
 // routes builds the complete HTTP handler. Dashboard, demo site, beacon,
 // collection endpoint, and JSON API all share one mux on one port, which is what
 // lets the whole tool be one command with no configuration.
-func routes(db *store.Store) (http.Handler, error) {
+func routes(db *store.Store) (http.Handler, *dash.API, error) {
 	mux := http.NewServeMux()
 
 	collector := ingest.NewHandler(db)
@@ -73,14 +154,14 @@ func routes(db *store.Store) (http.Handler, error) {
 
 	beaconHandler, err := beacon.Handler()
 	if err != nil {
-		return nil, fmt.Errorf("preparing beacon: %w", err)
+		return nil, nil, fmt.Errorf("preparing beacon: %w", err)
 	}
 	mux.Handle("GET "+beacon.Path, beaconHandler)
 	mux.Handle("GET /beacon.src.js", beaconHandler)
 
 	demoHandler, err := demo.Handler()
 	if err != nil {
-		return nil, fmt.Errorf("preparing demo site: %w", err)
+		return nil, nil, fmt.Errorf("preparing demo site: %w", err)
 	}
 	mux.Handle("GET "+demo.Prefix, demoHandler)
 
@@ -97,11 +178,11 @@ func routes(db *store.Store) (http.Handler, error) {
 	// The file server answers non-GET with 405 itself.
 	dashHandler, err := dash.Assets()
 	if err != nil {
-		return nil, fmt.Errorf("preparing dashboard: %w", err)
+		return nil, nil, fmt.Errorf("preparing dashboard: %w", err)
 	}
 	mux.Handle("/", dashHandler)
 
-	return mux, nil
+	return mux, api, nil
 }
 
 // BeaconPath is where the minified beacon is served, exported so an embedder

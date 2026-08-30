@@ -22,7 +22,14 @@ type API struct {
 	store    *store.Store
 	counters func() ingest.Counters
 	now      func() time.Time
+	// retention is how long day logs are kept, reported so the dashboard can
+	// say why old measurements are gone. Zero means nothing is dropped.
+	retention time.Duration
 }
+
+// SetRetention records the retention window the server was started with, for
+// reporting only. The API never deletes anything.
+func (a *API) SetRetention(d time.Duration) { a.retention = d }
 
 // NewAPI returns an API reading from s. A nil counters function reports zeros.
 func NewAPI(s *store.Store, counters func() ingest.Counters) *API {
@@ -92,11 +99,19 @@ type comparison struct {
 }
 
 // coverageSummary reports what the store holds overall, so the dashboard can
-// distinguish an empty window from an empty store.
+// distinguish an empty window from an empty store, and what that costs on disk.
 type coverageSummary struct {
 	Total  int        `json:"total"`
 	Oldest *time.Time `json:"oldest"`
 	Newest *time.Time `json:"newest"`
+	// Bytes is the size of the day logs, Files their count, and
+	// BytesPerRecord the average on-disk cost of one measurement. A tool that
+	// argues about page weight should be able to say what it weighs on disk.
+	Bytes          int64   `json:"bytes"`
+	Files          int     `json:"files"`
+	BytesPerRecord float64 `json:"bytesPerRecord"`
+	// RetentionDays is how long day logs are kept, 0 when nothing is dropped.
+	RetentionDays float64 `json:"retentionDays"`
 }
 
 func (a *API) handleSummary(w http.ResponseWriter, r *http.Request) {
@@ -209,11 +224,16 @@ func unitOf(m stats.Metric) string {
 	return "ms"
 }
 
-// coverage reports the store's overall extent.
+// coverage reports the store's overall extent and its disk footprint. A disk
+// read that fails leaves the byte fields at zero rather than failing the whole
+// response: the figures are diagnostics, not the measurement.
 func (a *API) coverage() *coverageSummary {
-	c := &coverageSummary{Total: a.store.Count()}
+	c := &coverageSummary{Total: a.store.Count(), RetentionDays: a.retention.Hours() / 24}
 	if oldest, newest, ok := a.store.Span(); ok {
 		c.Oldest, c.Newest = &oldest, &newest
+	}
+	if u, err := a.store.Usage(); err == nil {
+		c.Bytes, c.Files, c.BytesPerRecord = u.Bytes, u.Files, u.BytesPerRecord()
 	}
 	return c
 }

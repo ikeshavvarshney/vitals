@@ -453,3 +453,125 @@ func TestConcurrentAppendAndQuery(t *testing.T) {
 		t.Errorf("Count = %d, want %d", got, writers*perWriter)
 	}
 }
+
+func TestUsageReportsWhatIsOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	s, _, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	empty, err := s.Usage()
+	if err != nil {
+		t.Fatalf("Usage: %v", err)
+	}
+	if empty.Files != 0 || empty.Bytes != 0 || empty.BytesPerRecord() != 0 {
+		t.Errorf("empty store usage = %+v, want zeros", empty)
+	}
+
+	for i := 0; i < 10; i++ {
+		if err := s.Append(sample(time.Duration(i)*time.Minute, "/", 1500)); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	if err := s.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	u, err := s.Usage()
+	if err != nil {
+		t.Fatalf("Usage: %v", err)
+	}
+	if u.Files != 1 {
+		t.Errorf("Files = %d, want 1", u.Files)
+	}
+	if u.Records != 10 {
+		t.Errorf("Records = %d, want 10", u.Records)
+	}
+	if u.Bytes <= 0 {
+		t.Errorf("Bytes = %d, want the size of the day log", u.Bytes)
+	}
+	if got := u.BytesPerRecord(); got < 1 || got > 1000 {
+		t.Errorf("BytesPerRecord = %v, want a plausible per-record cost", got)
+	}
+	if u.OldestDay != u.NewestDay || u.OldestDay == "" {
+		t.Errorf("days = %q..%q, want one day", u.OldestDay, u.NewestDay)
+	}
+}
+
+func TestPruneDropsWholeDaysOnly(t *testing.T) {
+	dir := t.TempDir()
+	s, _, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Three days, one record each.
+	days := []time.Time{
+		baseTime.AddDate(0, 0, -3),
+		baseTime.AddDate(0, 0, -2),
+		baseTime,
+	}
+	for _, at := range days {
+		if err := s.Append(sample(at.Sub(baseTime), "/", 1000)); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	if err := s.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	// Keep the last two days.
+	files, records, err := s.Prune(baseTime.AddDate(0, 0, -2))
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if files != 1 || records != 1 {
+		t.Errorf("Prune removed %d files and %d records, want 1 and 1", files, records)
+	}
+	if s.Count() != 2 {
+		t.Errorf("Count = %d, want 2 after pruning", s.Count())
+	}
+
+	// The route index must survive: a stale index would point past the slice.
+	seen := 0
+	s.EachRoute("/", Range{}, func(Record) bool { seen++; return true })
+	if seen != 2 {
+		t.Errorf("route index yields %d records, want 2", seen)
+	}
+
+	u, err := s.Usage()
+	if err != nil {
+		t.Fatalf("Usage: %v", err)
+	}
+	if u.Files != 2 {
+		t.Errorf("Files = %d, want 2 after pruning", u.Files)
+	}
+
+	// Pruning again changes nothing.
+	files, records, err = s.Prune(baseTime.AddDate(0, 0, -2))
+	if err != nil {
+		t.Fatalf("second Prune: %v", err)
+	}
+	if files != 0 || records != 0 {
+		t.Errorf("second Prune removed %d files and %d records, want none", files, records)
+	}
+
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// What survived pruning must survive a restart.
+	reopened, skipped, err := Open(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer reopened.Close()
+	if skipped != 0 {
+		t.Errorf("skipped = %d, want 0", skipped)
+	}
+	if reopened.Count() != 2 {
+		t.Errorf("after restart Count = %d, want 2", reopened.Count())
+	}
+}
