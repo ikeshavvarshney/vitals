@@ -218,7 +218,7 @@ for.
 
 ## Dashboard
 
-- **React / Vue / Svelte** → about 380 lines of vanilla JavaScript in
+- **React / Vue / Svelte** → about 400 lines of vanilla JavaScript in
   `dash.js`. The dashboard renders four API responses into a scorecard, a
   chart, two tables, and a counter row, and re-renders the whole thing on each
   refresh. There is no shared mutable state and no partial update, so the thing
@@ -242,11 +242,16 @@ for.
   system, no tree shaking, and the source is what ships. At this size that is a
   fair trade, and it means the file a judge reads is the file the browser runs.
 
-- **`normalize.css` / Tailwind / any CSS framework** → about 340 lines of hand
-  written CSS with custom properties for the palette. Tailwind would need a
-  build step to be anything other than enormous. The status colours are the
-  only saturated values on the page, and they come from the Core Web Vitals
-  banding rather than from a design system.
+- **`normalize.css` / Tailwind / Bootstrap / any CSS framework** → about 470
+  lines of hand-written CSS driven by custom properties. Tailwind needs a build
+  step to be anything other than enormous, and a component framework would ship
+  a grid system, a modal, and a typography scale to render five cards and two
+  tables. The palette is three status colours from the Core Web Vitals banding
+  plus one identity hue per metric; gradients, tinted surfaces, and the pill
+  badges are all `color-mix` and `linear-gradient`, so the whole visual system
+  costs 3.8KB gzipped and zero requests. What a framework genuinely brings that
+  this does not: a tested cross-browser reset, documented components, and
+  someone else maintaining the dark mode.
 
 - **`date-fns` / `moment` / `dayjs`** → `Date` and `Intl` methods already in
   the browser, plus `time` on the server. The dashboard formats a clock time

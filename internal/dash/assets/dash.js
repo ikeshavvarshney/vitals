@@ -125,9 +125,11 @@
 
       var meta = m.samples === 1 ? '1 sample' : m.samples.toLocaleString() + ' samples';
 
-      var card = h('div', { class: 'card ' + band, title: METRIC_TITLES[m.metric] || '' }, [
-        name, valueNode, h('div', { class: 'card-meta', text: meta })
-      ]);
+      var card = h('div', {
+        class: 'card ' + band,
+        'data-metric': m.metric,
+        title: METRIC_TITLES[m.metric] || ''
+      }, [name, valueNode, h('div', { class: 'card-meta', text: meta })]);
       el.scorecard.appendChild(card);
     });
   }
@@ -165,6 +167,7 @@
 
     var root = svg('svg', {
       viewBox: '0 0 ' + CHART.w + ' ' + CHART.h,
+      style: '--series-hue: var(--' + data.metric + ')',
       role: 'img',
       'aria-label': (METRIC_TITLES[data.metric] || data.metric) +
         ' 75th percentile over time, ' + points.length + ' buckets with data'
@@ -222,8 +225,16 @@
     });
     if (run.length) runs.push(run);
 
+    var baseline = CHART.top + innerH;
     runs.forEach(function (r) {
       if (r.length > 1) {
+        // Area first, so the line's stroke sits cleanly on top of it.
+        root.appendChild(svg('polygon', {
+          class: 'area',
+          points: r[0].x + ',' + baseline + ' ' +
+            r.map(function (p) { return p.x + ',' + p.y; }).join(' ') + ' ' +
+            r[r.length - 1].x + ',' + baseline
+        }));
         root.appendChild(svg('polyline', {
           class: 'line',
           points: r.map(function (p) { return p.x + ',' + p.y; }).join(' ')

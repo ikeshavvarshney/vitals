@@ -151,7 +151,7 @@ normally be here, what replaced it, and where the original is better.
 
 The short version: `express`, `serve-static`, `compression`, `etag`, and `cors`
 became `internal/httpx`. `web-vitals` became a hand-written beacon. React, a
-bundler, and a charting library became 391 lines of vanilla JS emitting inline
+bundler, and a charting library became 402 lines of vanilla JS emitting inline
 SVG. A database server and driver became an append log and a sorted slice.
 
 ## Build targets

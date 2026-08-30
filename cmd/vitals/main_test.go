@@ -128,7 +128,7 @@ func TestEveryRouteIsReachable(t *testing.T) {
 		{"/demo/heavy.html", "text/html; charset=utf-8", "heavy hero image"},
 		{"/demo/shifty.html", "text/html; charset=utf-8", "moves under you"},
 		{"/demo/blocking.html", "text/html; charset=utf-8", "blocks when you interact"},
-		{"/demo/demo.css", "text/css; charset=utf-8", "--accent"},
+		{"/demo/demo.css", "text/css; charset=utf-8", "--lcp"},
 		{"/healthz", "text/plain; charset=utf-8", "ok"},
 		{"/api/summary", "application/json; charset=utf-8", `"metrics"`},
 		{"/api/series", "application/json; charset=utf-8", `"buckets"`},
