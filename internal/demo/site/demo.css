@@ -166,12 +166,14 @@ code {
 
 a { color: var(--fcp); }
 
-svg.hero {
+img.hero {
+  display: block;
   width: 100%;
   height: auto;
   border-radius: 10px;
   box-shadow: var(--shadow);
   margin: 1.5rem 0;
+  background: #1b1b22;
 }
 
 footer {

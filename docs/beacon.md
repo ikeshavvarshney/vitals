@@ -167,6 +167,10 @@ exceptions, or failed requests; all five metrics were collected, transmitted,
 stored, and rendered. INP measured 600.0ms against a handler deliberately
 blocking for 600ms.
 
+The demo pages are part of that verification: the heavy page reports an LCP in
+the needs-improvement band and the blocked-interaction page a poor INP, so the
+dashboard demonstrates more than one status band from real measurements.
+
 **Firefox and Safari have not been tested.** Support there is claimed on
 standards compliance, not on evidence.
 
