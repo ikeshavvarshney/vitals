@@ -65,6 +65,7 @@ hidden. It sets no cookie and no persistent identifier.
 | Document | Contents |
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | How the pieces fit together, request flow, design decisions, limits |
+| [`docs/metrics.md`](docs/metrics.md) | What each Core Web Vital is, its thresholds, and how this project obtains it |
 | [`docs/beacon.md`](docs/beacon.md) | What the client script measures, how accurate each metric is, what it does not handle |
 | [`docs/api.md`](docs/api.md) | Every endpoint, parameter, and response shape |
 | [`docs/storage.md`](docs/storage.md) | On-disk format, durability, percentile arithmetic and error bounds |
