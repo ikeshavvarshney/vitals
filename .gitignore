@@ -5,6 +5,6 @@
 /data/
 
 # Internal working documents, kept locally but not published.
-CLAUDE.md
+./CLAUDE.md
 PRD.md
 DESIGN.md

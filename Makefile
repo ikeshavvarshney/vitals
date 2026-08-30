@@ -14,7 +14,7 @@ endif
 # nothing injects a timestamp or a git SHA. Those three facts are what make the
 # output byte-identical across rebuilds.
 
-.PHONY: all build run test check proof repro clean
+.PHONY: all build run test race check proof repro clean
 
 all: build
 
@@ -29,6 +29,15 @@ run: build
 ## test: run the full test suite
 test:
 	go test ./...
+
+## race: run the test suite under the race detector, inside Docker
+#
+# The race detector needs an external linker and therefore a C toolchain, which
+# not every machine has. This borrows Linux's. It is the only target that needs
+# anything outside the Go toolchain, it is a test-time convenience rather than
+# part of the build, and CI runs the same command natively.
+race:
+	docker run --rm -v "$(CURDIR)":/src -w /src golang:1.23 go test -race ./...
 
 ## check: fail on any dependency violation
 check:

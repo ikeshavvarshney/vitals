@@ -148,6 +148,7 @@ SVG. A database server and driver became an append log and a sorted slice.
 | `make` | Build the binary |
 | `make run` | Build and serve dashboard + demo on :8080 |
 | `make test` | Run tests |
+| `make race` | Run tests under the race detector, via Docker |
 | `make check` | Fail on any dependency violation |
 | `make proof` | Regenerate `deps-proof.txt` |
 | `make repro` | Build twice, print both hashes |
