@@ -5,7 +5,7 @@ dependency manifest.
 
 The tool that measures page weight should not be page weight. A mainstream
 analytics snippet is 30-60KB of third-party JavaScript on every page view. This
-one is **[XXX] bytes**, served from your own origin, and the backend it talks to
+one is **942 bytes**, served from your own origin, and the backend it talks to
 has no database server, no driver, no charting library, and no framework.
 
 ```
@@ -88,11 +88,14 @@ makes the output byte-identical.
 
 | | Raw | Gzipped |
 |---|---|---|
-| `vitals` beacon | **[XXX] B** | [XXX] B |
-| Google `web-vitals` v4 (UMD) | ~[XXX] B | ~[XXX] B |
+| `vitals` beacon | **942 B** | 571 B |
+| Google `web-vitals` v4 (UMD) | _not yet measured_ | _not yet measured_ |
 
-Measured with `make beacon`, which fails the build if the raw beacon exceeds
-1024 bytes.
+Our own numbers are measured by `make beacon`, which fails the build if the raw
+beacon exceeds 1024 bytes. The `web-vitals` row is left blank until the actual
+published file is downloaded and measured the same way; quoting a number from
+memory here would be exactly the kind of unverified claim this project is
+supposed to avoid.
 
 The beacon exists in two forms: `beacon.src.js` is the readable, commented
 source, and `beacon.min.js` is a hand-minified version. There is no minifier
@@ -103,15 +106,23 @@ mechanically derived from it.
 
 This section is the point of the project, so it is specific.
 
-**INP is approximated.** True INP requires tracking interaction latency across
-all event entries and taking a high percentile of them. This implementation
-[describe what it actually does]. It is directionally correct and wrong in the
-tail. Google's `web-vitals` does this properly.
+**INP is approximated.** True INP requires tracking full interaction latency
+across all event entries and reporting a high percentile of them. This
+implementation reports the **maximum duration of any single event** longer than
+16ms, observed through `PerformanceObserver` with `durationThreshold: 16`. On a
+page with few interactions the two agree. On a page with many, the maximum is
+higher than the 98th percentile that real INP reports, so this number is
+pessimistic and wrong in the tail. It is labelled INP on the dashboard because
+that is the metric it approximates, and this paragraph is the correction.
+Google's `web-vitals` does this properly.
 
 **Percentiles are bucketed, not exact.** Values go into log-spaced histogram
-buckets and p75 is read off cumulative counts. Error is bounded by bucket
-width: under [XXX]% relative. Exact percentiles would require retaining every sample
-in sorted order; this is the trade production RUM systems make too.
+buckets and p75 is read off cumulative counts. For the millisecond metrics the
+buckets grow 10% at a time and the reported value is the geometric mean of its
+bucket, which bounds the error at **4.9% relative**. CLS uses linear buckets of
+0.005, so its error is 0.0025 absolute. Exact percentiles would require
+retaining every sample in sorted order; this is the trade production RUM systems
+make too.
 
 **Up to 2 seconds of samples are lost on crash.** Writes are buffered and
 flushed on an interval. For performance telemetry this is a deliberate trade,

@@ -175,3 +175,43 @@ for.
   from the filesystem by request path, so directory traversal has nothing to
   traverse to. This is a stronger guarantee than a path-prefix check, and it is
   a property of the design rather than a check that could be forgotten.
+
+## Beacon
+
+- **`web-vitals` (Google)** → `internal/beacon/beacon.src.js`, hand-written over
+  `PerformanceObserver`, 942 bytes raw and 571 gzipped. This is the headline
+  substitution: the tool that measures page weight adds 942 bytes to a page
+  instead of several kilobytes of someone else's JavaScript from someone else's
+  CDN.
+
+  Where theirs is better, specifically:
+
+  - **INP is real.** `web-vitals` tracks full interaction latency across every
+    event in an interaction and reports a high percentile. Ours reports the
+    maximum duration of a single event over 16ms. Directionally right,
+    pessimistic in the tail.
+  - **Back-forward cache.** A page restored from bfcache is a new page view
+    with new metrics. `web-vitals` handles the restore and re-reports; ours
+    does not, so a back-navigation is silently missed.
+  - **Soft navigations.** Single-page-app route changes produce no new
+    metrics here at all.
+  - **Prerendering** and `activationStart` correction: not handled.
+  - **Browser quirks.** Years of accumulated workarounds for older Safari and
+    for LCP edge cases that ours simply does not have.
+
+  Ours is correct for a normal page load on current Chrome, Firefox, and
+  Safari, and that is the claim being made.
+
+- **`terser` / `esbuild` / `uglify-js`** → hand minification. `beacon.src.js`
+  is the commented source a reviewer reads; `beacon.min.js` is written by hand
+  from it. A minifier is a build-time dependency, and this project has no build
+  step at all. The honest cost: the two files are kept in sync by a human, so
+  they can drift. `beacon_test.go` asserts every metric key, entry type, and
+  endpoint appears in both, and `TestMinifiedIsActuallyMinified` catches the
+  worst mistake, which is shipping the readable file under the minified name. A
+  real minifier would make drift structurally impossible.
+
+- **`webpack` / `rollup` / `vite`** → no bundler, because there is nothing to
+  bundle. The beacon is one IIFE in one file with no imports. Bundlers earn
+  their place with module graphs, tree shaking, and code splitting; a
+  single-file script has none of those problems.

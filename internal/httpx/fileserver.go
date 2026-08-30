@@ -82,6 +82,27 @@ func NewFileServer(fsys fs.FS) (*FileServer, error) {
 	return s, nil
 }
 
+// NewFileServerFromMap prepares a handler serving an explicit set of files,
+// keyed by path relative to the root and without a leading slash.
+//
+// This exists for callers that hold their assets as bytes rather than behind an
+// [fs.FS], which is the case when a handful of files are embedded individually
+// rather than as a directory.
+func NewFileServerFromMap(files map[string][]byte) (*FileServer, error) {
+	if len(files) == 0 {
+		return nil, fmt.Errorf("httpx: no assets found")
+	}
+
+	s := &FileServer{
+		assets: make(map[string]*asset, len(files)),
+		index:  "index.html",
+	}
+	for name, body := range files {
+		s.assets["/"+strings.TrimPrefix(name, "/")] = newAsset(name, body)
+	}
+	return s, nil
+}
+
 // newAsset prepares one file: media type, cache policy, entity tag, and a gzip
 // encoding when that is smaller than the original.
 func newAsset(name string, body []byte) *asset {

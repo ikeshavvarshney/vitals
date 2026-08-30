@@ -14,7 +14,7 @@ endif
 # nothing injects a timestamp or a git SHA. Those three facts are what make the
 # output byte-identical across rebuilds.
 
-.PHONY: all build run test race check proof repro clean
+.PHONY: all build run test race check beacon proof repro clean
 
 all: build
 
@@ -42,6 +42,10 @@ race:
 ## check: fail on any dependency violation
 check:
 	go run ./tools/check .
+
+## beacon: print the beacon size and enforce the 1KB budget
+beacon:
+	go run ./tools/beaconsize
 
 ## proof: regenerate deps-proof.txt
 proof:
