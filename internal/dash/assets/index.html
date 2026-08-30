@@ -5,28 +5,40 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>vitals</title>
 <link rel="stylesheet" href="/dash.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#9679;</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%23067a52'/></svg>">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 
 <header class="bar">
-  <div class="brand">
-    <span class="dot" aria-hidden="true"></span>
-    <h1>vitals</h1>
-  </div>
+  <div class="bar-inner">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <h1>vitals</h1>
+      <span class="brand-note">Core Web Vitals, self-hosted</span>
+    </div>
 
-  <dl class="ledger" aria-label="This page's own weight">
-    <div><dt>beacon</dt><dd id="ledger-beacon">&mdash;</dd></div>
-    <div><dt>this page</dt><dd id="ledger-page">&mdash;</dd></div>
-    <div><dt>requests</dt><dd id="ledger-requests">&mdash;</dd></div>
-  </dl>
+    <dl class="ledger" aria-label="This page's own weight">
+      <div>
+        <dt>Beacon</dt>
+        <dd id="ledger-beacon">&mdash;</dd>
+      </div>
+      <div>
+        <dt>This page</dt>
+        <dd id="ledger-page">&mdash;</dd>
+      </div>
+      <div>
+        <dt>Requests</dt>
+        <dd id="ledger-requests">&mdash;</dd>
+      </div>
+    </dl>
+  </div>
 </header>
 
 <main id="main">
-  <form class="controls" id="controls">
-    <label>
-      <span>Window</span>
+  <div class="toolbar">
+    <div class="field">
+      <label for="window">Time window</label>
       <select id="window" name="window">
         <option value="1h">Last hour</option>
         <option value="6h">Last 6 hours</option>
@@ -34,29 +46,34 @@
         <option value="168h">Last 7 days</option>
         <option value="720h">Last 30 days</option>
       </select>
-    </label>
-    <label>
-      <span>Chart metric</span>
-      <select id="metric" name="metric">
-        <option value="lcp" selected>LCP</option>
-        <option value="inp">INP</option>
-        <option value="cls">CLS</option>
-        <option value="fcp">FCP</option>
-        <option value="ttfb">TTFB</option>
-      </select>
-    </label>
-    <button type="button" id="refresh">Refresh</button>
-    <p class="status" id="status" role="status" aria-live="polite"></p>
-  </form>
+    </div>
+
+    <div class="field grow">
+      <span id="metric-label">Metric</span>
+      <div class="segmented" role="radiogroup" aria-labelledby="metric-label" id="metric-group"></div>
+    </div>
+
+    <div class="toolbar-end">
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+      <button type="button" id="refresh">Refresh</button>
+    </div>
+  </div>
 
   <section aria-labelledby="scorecard-heading">
-    <h2 id="scorecard-heading">Scorecard <span class="sub">75th percentile</span></h2>
+    <div class="section-head">
+      <h2 id="scorecard-heading">Scorecard</h2>
+      <p class="section-note">75th percentile across the selected window</p>
+    </div>
     <div class="scorecard" id="scorecard"></div>
   </section>
 
   <section aria-labelledby="series-heading">
-    <h2 id="series-heading">Over time <span class="sub" id="series-sub"></span></h2>
-    <figure class="chart">
+    <div class="section-head">
+      <h2 id="series-heading">Trend</h2>
+      <p class="section-note" id="series-sub"></p>
+    </div>
+    <figure class="panel chart">
+      <div class="chart-readout" id="series-readout" aria-hidden="true"></div>
       <div id="series"></div>
       <figcaption id="series-caption"></figcaption>
     </figure>
@@ -64,29 +81,44 @@
 
   <div class="split">
     <section aria-labelledby="routes-heading">
-      <h2 id="routes-heading">By route <span class="sub">worst first</span></h2>
-      <div class="table-wrap"><table id="routes"><caption class="visually-hidden">75th percentile by route</caption></table></div>
+      <div class="section-head">
+        <h2 id="routes-heading">By route</h2>
+        <p class="section-note">Slowest first</p>
+      </div>
+      <div class="panel table-wrap">
+        <table id="routes"><caption class="visually-hidden">75th percentile by route</caption></table>
+      </div>
     </section>
 
     <section aria-labelledby="devices-heading">
-      <h2 id="devices-heading">By device <span class="sub">from viewport width</span></h2>
-      <div class="table-wrap"><table id="devices"><caption class="visually-hidden">75th percentile by device class</caption></table></div>
+      <div class="section-head">
+        <h2 id="devices-heading">By device</h2>
+        <p class="section-note">Derived from viewport width</p>
+      </div>
+      <div class="panel table-wrap">
+        <table id="devices"><caption class="visually-hidden">75th percentile by device class</caption></table>
+      </div>
     </section>
   </div>
 
   <section aria-labelledby="ingest-heading">
-    <h2 id="ingest-heading">Ingest</h2>
+    <div class="section-head">
+      <h2 id="ingest-heading">Ingest</h2>
+      <p class="section-note">Counted since the server started</p>
+    </div>
     <dl class="counters" id="counters"></dl>
   </section>
 
   <footer class="notes">
-    <p><strong>Percentiles are approximate.</strong> Values are bucketed; the
-    millisecond metrics carry up to 4.9% relative error and CLS 0.0025 absolute.</p>
-    <p><strong>INP is approximated.</strong> This is the maximum duration of a
-    single event over 16ms, not the high percentile of interaction latency that
-    real INP reports. It is pessimistic in the tail.</p>
+    <h2>Reading these numbers</h2>
+    <p><strong>Percentiles are approximate.</strong> Values are bucketed rather
+    than sorted. Millisecond metrics carry up to 4.9% relative error; CLS carries
+    0.0025 absolute.</p>
+    <p><strong>INP is approximated.</strong> This is the longest single event over
+    16ms, not the high percentile of interaction latency that real INP reports.
+    It is pessimistic in the tail.</p>
     <p><strong>Buffered writes.</strong> Up to 2 seconds of samples are lost if
-    the server is killed.</p>
+    the server is killed rather than shut down.</p>
   </footer>
 </main>
 
