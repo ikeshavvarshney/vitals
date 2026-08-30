@@ -18,8 +18,8 @@ or any third party.
 
 | File | Role |
 |---|---|
-| `internal/beacon/beacon.src.js` | Readable, commented source. This is what a reviewer reads. |
-| `internal/beacon/beacon.min.js` | Hand-minified. This is what ships at `/b.js`. |
+| `src/internal/beacon/beacon.src.js` | Readable, commented source. This is what a reviewer reads. |
+| `src/internal/beacon/beacon.min.js` | Hand-minified. This is what ships at `/b.js`. |
 
 There is no minifier in this project, so the minified file is written by hand
 from the source. Both are served: the readable version is available at
@@ -41,7 +41,7 @@ structurally impossible.
 | `web-vitals` 4.2.4 `iife` | 7,226 B | 2,601 B |
 | `web-vitals` 4.2.4 `attribution.iife` | 12,505 B | 4,172 B |
 
-All three measured by `tools/compare` with the same gzip implementation, because
+All three measured by `src/tools/compare` with the same gzip implementation, because
 comparing one file compressed by one implementation against another compressed
 by a different one produces a difference of a few percent that is an artefact of
 the tooling.
@@ -165,7 +165,7 @@ The beacon is installed by a site owner. For a site that is not yours, the
 dashboard offers a bookmarklet that measures a single visit.
 
 It is a separate program from the beacon, defined as `snapshotProgram` in
-`internal/dash/assets/dash.js` and serialised into a `javascript:` URL with
+`src/internal/dash/assets/dash.js` and serialised into a `javascript:` URL with
 `Function.prototype.toString`. There is one copy of it, so it does not
 introduce the hand-sync problem described in section 2. It observes the same
 five entry types and computes CLS with the same session-window arithmetic; a

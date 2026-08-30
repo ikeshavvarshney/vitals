@@ -49,7 +49,7 @@ make proof          # writes deps-proof.txt
 
 ### What `make check` enforces
 
-`tools/check` walks the repository and fails the build on:
+`src/tools/check` walks the repository and fails the build on:
 
 - a `require` directive in `go.mod`, including an empty block
 - a `vendor` directory
@@ -72,13 +72,13 @@ which is why this project avoids the development-dependency question entirely.
 
 | Area | What is covered |
 |---|---|
-| `internal/ingest` | Malformed input, escapes, surrogates, size limits, plus a fuzz target |
-| `internal/stats` | Known distributions, skew, the error bound, merging, overflow |
-| `internal/store` | Restart survival, corrupt and truncated lines, day rotation, out-of-order arrival, concurrency |
-| `internal/httpx` | Conditional requests, gzip negotiation, MIME mapping, path traversal |
-| `internal/dash` | Parameter parsing, every endpoint, response shapes |
-| `internal/beacon` | Size budget, minification, source and minified agreement |
-| `cmd/vitals` | End-to-end: post a payload, read it back through the API |
+| `src/internal/ingest` | Malformed input, escapes, surrogates, size limits, plus a fuzz target |
+| `src/internal/stats` | Known distributions, skew, the error bound, merging, overflow |
+| `src/internal/store` | Restart survival, corrupt and truncated lines, day rotation, out-of-order arrival, concurrency |
+| `src/internal/httpx` | Conditional requests, gzip negotiation, MIME mapping, path traversal |
+| `src/internal/dash` | Parameter parsing, every endpoint, response shapes |
+| `src/internal/beacon` | Size budget, minification, source and minified agreement |
+| `src/cmd/vitals` | End-to-end: post a payload, read it back through the API |
 
 The ingest parser has a fuzz target, since it is the only place the program
 reads untrusted input:

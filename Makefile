@@ -20,7 +20,7 @@ all: build
 
 ## build: compile the single binary
 build:
-	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o $(BIN) ./cmd/vitals
+	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o $(BIN) ./src/cmd/vitals
 
 ## run: build, then serve the dashboard and demo site on :8080
 run: build
@@ -41,18 +41,18 @@ race:
 
 ## check: fail on any dependency violation
 check:
-	go run ./tools/check .
+	go run ./src/tools/check .
 
 ## beacon: print the beacon size and enforce the 1KB budget
 beacon:
-	go run ./tools/beaconsize
+	go run ./src/tools/beaconsize
 
 ## compare: print beacon size beside any scripts given in FILES
 #
 # Not part of the build and it fetches nothing. Download a competitor's script
 # first, then: make compare FILES="web-vitals.iife.js"
 compare:
-	go run ./tools/compare $(FILES)
+	go run ./src/tools/compare $(FILES)
 
 ## proof: regenerate deps-proof.txt
 proof:
@@ -68,9 +68,9 @@ proof:
 
 ## repro: build twice and print both SHA-256 hashes
 repro:
-	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o vitals.repro1 ./cmd/vitals
-	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o vitals.repro2 ./cmd/vitals
-	@go run ./tools/sha256sum vitals.repro1 vitals.repro2
+	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o vitals.repro1 ./src/cmd/vitals
+	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o vitals.repro2 ./src/cmd/vitals
+	@go run ./src/tools/sha256sum vitals.repro1 vitals.repro2
 
 ## clean: remove build output
 clean:

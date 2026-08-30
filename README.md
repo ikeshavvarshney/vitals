@@ -105,7 +105,37 @@ Verified against real sites in Chrome 152. Other browsers are untested.
 | [`docs/api.md`](docs/api.md) | Every endpoint, parameter, and response shape |
 | [`docs/storage.md`](docs/storage.md) | On-disk format, durability, percentile arithmetic and error bounds |
 | [`docs/development.md`](docs/development.md) | Building, testing, CI, the dependency rules |
+| [`tests/README.md`](tests/README.md) | What the black-box tests cover, and where the unit tests live |
 | [`STDLIB.md`](STDLIB.md) | Every package replaced, and where the original is better |
+
+## Repository layout
+
+```
+vitals/
+├── README.md            what it does, how to run it, honest limits
+├── STDLIB.md            every package replaced, and where the original is better
+├── Makefile             one command to a runnable binary
+├── go.mod               the manifest: no require block
+├── deps-proof.txt       go.mod, go list -m all, go version
+├── .zero-dep.toml       track letter and one-line pitch
+├── src/
+│   ├── cmd/vitals/      the binary: flags, shutdown, logging
+│   ├── server/          the only exported package: store plus route table
+│   ├── internal/        beacon, ingest, store, stats, dash, demo, httpx
+│   └── tools/           dependency check, hashing, beacon size reporting
+├── tests/               black-box tests over the served HTTP surface
+└── docs/                architecture, metrics, beacon, API, storage, development
+```
+
+Two notes on where the tests are, since the layout above is not the whole
+picture. `tests/` holds the black-box tests: they drive the binary's own routing
+over HTTP and touch nothing but the public surface. Unit tests live beside the
+code they cover, because Go compiles a package's tests from that package's own
+directory, and only from there can they reach the unexported parsers and
+arithmetic where the risk actually is. Moving them out would mean exporting
+`parseQuery`, `summarize`, `wireRecord` and others for the sake of a directory
+listing. [`tests/README.md`](tests/README.md) maps every layer to the tests that
+cover it.
 
 ## Verifying zero dependencies
 
@@ -253,7 +283,7 @@ See [`STDLIB.md`](STDLIB.md) for the full list: every package that would
 normally be here, what replaced it, and where the original is better.
 
 The short version: `express`, `serve-static`, `compression`, `etag`, and `cors`
-became `internal/httpx`. `web-vitals` became a hand-written beacon. React, a
+became `src/internal/httpx`. `web-vitals` became a hand-written beacon. React, a
 bundler, and a charting library became 402 lines of vanilla JS emitting inline
 SVG. A database server and driver became an append log and a sorted slice.
 

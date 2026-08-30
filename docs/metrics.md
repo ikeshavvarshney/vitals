@@ -2,7 +2,7 @@
 
 What each Core Web Vital measures, what a good score is, what usually causes a
 bad one, and how `vitals` obtains the number. Thresholds are the published
-Google values, encoded once in `internal/stats/metric.go` and read by both the
+Google values, encoded once in `src/internal/stats/metric.go` and read by both the
 API and the dashboard.
 
 ---
@@ -206,6 +206,6 @@ nothing to that metric's histogram and nothing to its sample count.
 
 Metric definitions and thresholds follow the published Web Vitals
 specifications and Google's documentation at `web.dev/vitals`. The values in
-`internal/stats/metric.go` are the only copy in this project: the dashboard and
+`src/internal/stats/metric.go` are the only copy in this project: the dashboard and
 the API both read them from there, so a change to the standard is a one-line
 change here.

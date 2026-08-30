@@ -1,0 +1,9 @@
+track = "D"
+name = "vitals"
+pitch = "Self-hosted Core Web Vitals: a sub-1KB beacon, a JSONL store with histogram percentiles, and a dashboard, in one Go binary with an empty go.mod."
+language = "Go"
+manifest = "go.mod"
+build = "make"
+run = "./vitals"
+entrypoint = "src/cmd/vitals"
+dependencies = 0

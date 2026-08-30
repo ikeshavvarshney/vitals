@@ -22,11 +22,11 @@ flowchart LR
     end
 
     subgraph binary["vitals binary (single process)"]
-        httpx["internal/httpx<br/>static assets"]
-        ingest["internal/ingest<br/>parse, validate, derive session"]
-        store["internal/store<br/>append log + in-memory index"]
-        stats["internal/stats<br/>histograms, percentiles, banding"]
-        api["internal/dash<br/>JSON API"]
+        httpx["src/internal/httpx<br/>static assets"]
+        ingest["src/internal/ingest<br/>parse, validate, derive session"]
+        store["src/internal/store<br/>append log + in-memory index"]
+        stats["src/internal/stats<br/>histograms, percentiles, banding"]
+        api["src/internal/dash<br/>JSON API"]
     end
 
     disk[("data/YYYY-MM-DD.jsonl")]
@@ -50,34 +50,43 @@ one command with no configuration file and no external services.
 
 | Package | Responsibility |
 |---|---|
-| `cmd/vitals` | Flags, wiring, graceful shutdown, route table |
-| `internal/httpx` | Static file serving: MIME, ETag, gzip, cache policy |
-| `internal/beacon` | Client script, embedded and size-checked |
-| `internal/ingest` | Payload parsing, validation, session derivation, counters |
-| `internal/store` | Append log, replay, in-memory index, range queries |
-| `internal/stats` | Histograms, approximate percentiles, banding |
-| `internal/dash` | JSON API handlers and dashboard assets |
-| `internal/demo` | Bundled demo site |
-| `tools/` | Build-time utilities: dependency check, hashing, size reporting |
+| `src/cmd/vitals` | Flags, graceful shutdown, logging |
+| `src/server` | The module's only exported package: opens the store and builds the route table |
+| `src/internal/httpx` | Static file serving: MIME, ETag, gzip, cache policy |
+| `src/internal/beacon` | Client script, embedded and size-checked |
+| `src/internal/ingest` | Payload parsing, validation, session derivation, counters |
+| `src/internal/store` | Append log, replay, in-memory index, range queries |
+| `src/internal/stats` | Histograms, approximate percentiles, banding |
+| `src/internal/dash` | JSON API handlers and dashboard assets |
+| `src/internal/demo` | Bundled demo site |
+| `src/tools/` | Build-time utilities: dependency check, hashing, size reporting |
+| `tests/` | Black-box tests over the served HTTP surface; see `tests/README.md` |
+
+`src/server` exists so that a test, or an embedder, gets the routing the binary
+serves rather than a second copy assembled for the occasion. Everything it
+wires together stays under `src/internal`, which the compiler keeps private to
+this module.
 
 Dependencies run in one direction only:
 
 ```mermaid
 flowchart TD
-    cmd["cmd/vitals"]
-    dash["internal/dash"]
-    demo["internal/demo"]
-    beacon["internal/beacon"]
-    ingest["internal/ingest"]
-    store["internal/store"]
-    stats["internal/stats"]
-    httpx["internal/httpx"]
+    cmd["src/cmd/vitals"]
+    srv["src/server"]
+    dash["src/internal/dash"]
+    demo["src/internal/demo"]
+    beacon["src/internal/beacon"]
+    ingest["src/internal/ingest"]
+    store["src/internal/store"]
+    stats["src/internal/stats"]
+    httpx["src/internal/httpx"]
 
-    cmd --> dash
-    cmd --> demo
-    cmd --> beacon
-    cmd --> ingest
-    cmd --> store
+    cmd --> srv
+    srv --> dash
+    srv --> demo
+    srv --> beacon
+    srv --> ingest
+    srv --> store
     dash --> store
     dash --> stats
     dash --> ingest
@@ -90,11 +99,11 @@ flowchart TD
     store --> stats
 ```
 
-`internal/stats` and `internal/httpx` are leaves and depend on nothing within
+`src/internal/stats` and `src/internal/httpx` are leaves and depend on nothing within
 the project. There are no cycles.
 
-Assets under `internal/beacon`, `internal/dash/assets`, and
-`internal/demo/site` are embedded with `//go:embed`, making the binary
+Assets under `src/internal/beacon`, `src/internal/dash/assets`, and
+`src/internal/demo/site` are embedded with `//go:embed`, making the binary
 standalone. They reside inside the packages that embed them because `//go:embed`
 cannot reference paths outside its own package directory.
 
