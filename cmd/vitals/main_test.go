@@ -59,7 +59,7 @@ func TestEndToEnd(t *testing.T) {
 		Samples int `json:"samples"`
 		Metrics []struct {
 			Metric  string   `json:"metric"`
-			P75     *float64 `json:"p75"`
+			Value   *float64 `json:"value"`
 			Band    string   `json:"band"`
 			Samples uint64   `json:"samples"`
 		} `json:"metrics"`
@@ -82,12 +82,12 @@ func TestEndToEnd(t *testing.T) {
 			continue
 		}
 		found = true
-		if m.P75 == nil {
-			t.Fatal("lcp p75 is null after ingesting a measurement")
+		if m.Value == nil {
+			t.Fatal("lcp value is null after ingesting a measurement")
 		}
 		// 1834.2 lands within one bucket of itself.
-		if *m.P75 < 1834.2*0.95 || *m.P75 > 1834.2*1.05 {
-			t.Errorf("lcp p75 = %v, want about 1834.2", *m.P75)
+		if *m.Value < 1834.2*0.95 || *m.Value > 1834.2*1.05 {
+			t.Errorf("lcp value = %v, want about 1834.2", *m.Value)
 		}
 		if m.Band != "good" {
 			t.Errorf("lcp band = %q, want good", m.Band)

@@ -83,8 +83,8 @@ func TestSummaryEmptyStore(t *testing.T) {
 		t.Fatalf("got %d metrics, want %d", len(resp.Metrics), len(stats.Metrics))
 	}
 	for _, m := range resp.Metrics {
-		if m.P75 != nil {
-			t.Errorf("%s: P75 = %v, want null on an empty store", m.Metric, *m.P75)
+		if m.Value != nil {
+			t.Errorf("%s: P75 = %v, want null on an empty store", m.Metric, *m.Value)
 		}
 		if m.Band != "" {
 			t.Errorf("%s: Band = %q, want empty when there is no value", m.Metric, m.Band)
@@ -120,11 +120,11 @@ func TestSummary(t *testing.T) {
 	}
 
 	lcp := byMetric[stats.LCP]
-	if lcp.P75 == nil {
+	if lcp.Value == nil {
 		t.Fatal("lcp p75 is null")
 	}
 	// Exact p75 of 30..3000 in steps of 30 is 2250. Allow the bucket error.
-	if got := *lcp.P75; got < 2250*0.95 || got > 2250*1.05 {
+	if got := *lcp.Value; got < 2250*0.95 || got > 2250*1.05 {
 		t.Errorf("lcp p75 = %v, want about 2250", got)
 	}
 	if lcp.Band != "good" {
@@ -151,8 +151,8 @@ func TestSummary(t *testing.T) {
 	// A metric nobody reported has no value, rather than a zero that would
 	// render as a perfect score.
 	inp := byMetric[stats.INP]
-	if inp.P75 != nil {
-		t.Errorf("inp p75 = %v, want null; no samples were recorded", *inp.P75)
+	if inp.Value != nil {
+		t.Errorf("inp p75 = %v, want null; no samples were recorded", *inp.Value)
 	}
 }
 
@@ -239,7 +239,7 @@ func TestSeriesEmptyBucketsAreNull(t *testing.T) {
 
 	var nulls int
 	for _, b := range resp.Buckets {
-		if b.P75 == nil {
+		if b.Value == nil {
 			nulls++
 			if b.Samples != 0 {
 				t.Errorf("bucket with null p75 reports %d samples", b.Samples)
@@ -398,5 +398,140 @@ func TestNonGetIsRejected(t *testing.T) {
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", rec.Code)
+	}
+}
+
+func TestSummaryComparesWithPreviousWindow(t *testing.T) {
+	a := newTestAPI(t, func(s *store.Store) {
+		// This window: fast. The window before it: slow.
+		add(t, s, refNow.Add(-1*time.Hour), "/", 1440, map[stats.Metric]float64{stats.LCP: 900})
+		add(t, s, refNow.Add(-30*time.Hour), "/", 1440, map[stats.Metric]float64{stats.LCP: 4200})
+	})
+
+	var resp summaryResponse
+	call(t, a, "/api/summary?from=24h", &resp)
+
+	if resp.Compared == nil {
+		t.Fatal("Compared is nil; the scorecard cannot say whether a figure moved")
+	}
+	if !resp.Compared.To.Equal(resp.From) {
+		t.Errorf("compared window ends at %v, want the current window's start %v",
+			resp.Compared.To, resp.From)
+	}
+	if got := resp.To.Sub(resp.From); got != resp.Compared.To.Sub(resp.Compared.From) {
+		t.Errorf("compared window is not the same length as the current one")
+	}
+	if resp.Compared.Samples != 1 {
+		t.Errorf("Compared.Samples = %d, want 1", resp.Compared.Samples)
+	}
+
+	for _, m := range resp.Metrics {
+		if m.Metric != stats.LCP {
+			continue
+		}
+		if m.Value == nil || m.Previous == nil {
+			t.Fatalf("LCP p75 = %v, previous = %v; both windows hold a sample", m.Value, m.Previous)
+		}
+		if *m.Previous <= *m.Value {
+			t.Errorf("previous = %v, current = %v; the earlier window was slower", *m.Previous, *m.Value)
+		}
+		if m.PreviousSamples != 1 {
+			t.Errorf("PreviousSamples = %d, want 1", m.PreviousSamples)
+		}
+	}
+}
+
+func TestPercentileSelectsTheReportedQuantile(t *testing.T) {
+	a := newTestAPI(t, func(s *store.Store) {
+		// Nine fast views and one slow one: the median is unaffected by the
+		// outlier the 95th picks up.
+		for i := 0; i < 9; i++ {
+			add(t, s, refNow.Add(-time.Duration(i+1)*time.Minute), "/", 1440,
+				map[stats.Metric]float64{stats.LCP: 500})
+		}
+		add(t, s, refNow.Add(-10*time.Minute), "/", 1440,
+			map[stats.Metric]float64{stats.LCP: 8000})
+	})
+
+	read := func(target string) float64 {
+		t.Helper()
+		var resp summaryResponse
+		call(t, a, target, &resp)
+		for _, m := range resp.Metrics {
+			if m.Metric == stats.LCP {
+				if m.Value == nil {
+					t.Fatalf("%s: LCP has no value", target)
+				}
+				return *m.Value
+			}
+		}
+		t.Fatalf("%s: no LCP entry", target)
+		return 0
+	}
+
+	p50 := read("/api/summary?from=24h&p=50")
+	p95 := read("/api/summary?from=24h&p=95")
+
+	if p50 >= p95 {
+		t.Errorf("p50 = %v, p95 = %v; the tail must be at least as slow", p50, p95)
+	}
+	if p95 < 4000 {
+		t.Errorf("p95 = %v, want the slow sample near 8000", p95)
+	}
+
+	if rec := call(t, a, "/api/summary?p=99", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("p=99 status = %d, want 400", rec.Code)
+	}
+}
+
+func TestRouteFilterRestrictsEveryEndpoint(t *testing.T) {
+	a := newTestAPI(t, func(s *store.Store) {
+		add(t, s, refNow.Add(-1*time.Minute), "/fast", 1440, map[stats.Metric]float64{stats.LCP: 400})
+		add(t, s, refNow.Add(-2*time.Minute), "/slow", 390, map[stats.Metric]float64{stats.LCP: 7000})
+		add(t, s, refNow.Add(-3*time.Minute), "/slow", 390, map[stats.Metric]float64{stats.LCP: 7000})
+	})
+
+	var summary summaryResponse
+	call(t, a, "/api/summary?from=24h&route=%2Fslow", &summary)
+	if summary.Samples != 2 {
+		t.Errorf("Samples = %d, want 2; the filter must exclude /fast", summary.Samples)
+	}
+	if summary.Route != "/slow" {
+		t.Errorf("Route = %q, want %q", summary.Route, "/slow")
+	}
+
+	var routes groupResponse
+	call(t, a, "/api/routes?from=24h&route=%2Fslow", &routes)
+	if len(routes.Rows) != 1 || routes.Rows[0].Key != "/slow" {
+		t.Errorf("rows = %+v, want only /slow", routes.Rows)
+	}
+
+	var devices groupResponse
+	call(t, a, "/api/devices?from=24h&route=%2Fslow", &devices)
+	if len(devices.Rows) != 1 || devices.Rows[0].Key != "mobile" {
+		t.Errorf("device rows = %+v, want only mobile", devices.Rows)
+	}
+
+	var series seriesResponse
+	call(t, a, "/api/series?from=24h&route=%2Fslow&n=4", &series)
+	var samples uint64
+	for _, b := range series.Buckets {
+		samples += b.Samples
+	}
+	if samples != 2 {
+		t.Errorf("series holds %d samples, want 2", samples)
+	}
+
+	var report reportResponse
+	call(t, a, "/api/report?from=24h&route=%2Fslow", &report)
+	if report.Samples != 2 || report.Route != "/slow" {
+		t.Errorf("report pageViews = %d, route = %q; want 2 and /slow", report.Samples, report.Route)
+	}
+
+	// An unknown route is empty, not an error: a page can stop being visited.
+	var missing summaryResponse
+	rec := call(t, a, "/api/summary?from=24h&route=%2Fnope", &missing)
+	if rec.Code != http.StatusOK || missing.Samples != 0 {
+		t.Errorf("unknown route: status %d, samples %d; want 200 and 0", rec.Code, missing.Samples)
 	}
 }

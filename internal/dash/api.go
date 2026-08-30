@@ -13,8 +13,8 @@ import (
 	"vitals/internal/store"
 )
 
-// percentile is the quantile every figure on the dashboard reports. Core Web
-// Vitals are assessed at the 75th.
+// percentile is the quantile the dashboard reports unless a request asks for
+// another. Core Web Vitals are assessed at the 75th.
 const percentile = 0.75
 
 // API answers the dashboard's JSON requests over a measurement store.
@@ -47,10 +47,17 @@ func (a *API) Register(mux *http.ServeMux) {
 
 // metricSummary is one metric's headline figure.
 type metricSummary struct {
-	Metric  stats.Metric `json:"metric"`
-	P75     *float64     `json:"p75"` // null when there are no samples
-	Band    string       `json:"band"`
-	Samples uint64       `json:"samples"`
+	Metric stats.Metric `json:"metric"`
+	// Value is the figure at the requested percentile, null when there are no
+	// samples. The key is not named p75: the percentile is selectable, and a
+	// field called p75 holding a p90 would be a lie in every consumer.
+	Value   *float64 `json:"value"`
+	Band    string   `json:"band"`
+	Samples uint64   `json:"samples"`
+	// Previous is the same figure over the preceding window of equal length,
+	// null when that window holds no samples for this metric.
+	Previous        *float64 `json:"previous"`
+	PreviousSamples uint64   `json:"previousSamples"`
 	// Thresholds ship with the response so the dashboard need not duplicate
 	// the constants in JavaScript.
 	Good             float64 `json:"good"`
@@ -60,16 +67,28 @@ type metricSummary struct {
 
 // summaryResponse is the payload of GET /api/summary.
 type summaryResponse struct {
-	From     time.Time        `json:"from"`
-	To       time.Time        `json:"to"`
-	Samples  int              `json:"samples"`
-	Metrics  []metricSummary  `json:"metrics"`
-	Ingest   ingest.Counters  `json:"ingest"`
-	Coverage *coverageSummary `json:"coverage"`
+	From       time.Time        `json:"from"`
+	To         time.Time        `json:"to"`
+	Samples    int              `json:"samples"`
+	Percentile float64          `json:"percentile"`
+	Route      string           `json:"route,omitempty"`
+	Metrics    []metricSummary  `json:"metrics"`
+	Ingest     ingest.Counters  `json:"ingest"`
+	Coverage   *coverageSummary `json:"coverage"`
+	// Compared describes the preceding window each metric's Previous figure
+	// came from.
+	Compared *comparison `json:"compared"`
 	// BeaconBytes lets the dashboard show the beacon's size without issuing a
 	// request for it. A tool arguing about page weight should not add a round
 	// trip to report its own.
 	BeaconBytes int `json:"beaconBytes"`
+}
+
+// comparison names the window a metric's previous figure was taken from.
+type comparison struct {
+	From    time.Time `json:"from"`
+	To      time.Time `json:"to"`
+	Samples int       `json:"samples"`
 }
 
 // coverageSummary reports what the store holds overall, so the dashboard can
@@ -93,7 +112,7 @@ func (a *API) handleSummary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	total := 0
-	a.store.Each(q.Range, func(rec store.Record) bool {
+	a.each(q, q.Range, func(rec store.Record) bool {
 		total++
 		for m, v := range rec.Values {
 			if h, ok := hists[m]; ok {
@@ -103,15 +122,24 @@ func (a *API) handleSummary(w http.ResponseWriter, r *http.Request) {
 		return true
 	})
 
+	prev, prevRange, prevTotal := a.previous(q)
+
 	resp := summaryResponse{
-		From:    q.Range.From,
-		To:      q.Range.To,
-		Samples: total,
-		Metrics: make([]metricSummary, 0, len(stats.Metrics)),
-		Ingest:  a.counters(),
+		From:       q.Range.From,
+		To:         q.Range.To,
+		Samples:    total,
+		Percentile: q.Percentile,
+		Route:      q.Route,
+		Metrics:    make([]metricSummary, 0, len(stats.Metrics)),
+		Ingest:     a.counters(),
+		Compared: &comparison{
+			From:    prevRange.From,
+			To:      prevRange.To,
+			Samples: prevTotal,
+		},
 	}
 	for _, m := range stats.Metrics {
-		resp.Metrics = append(resp.Metrics, summarize(m, hists[m]))
+		resp.Metrics = append(resp.Metrics, summarize(m, hists[m], prev[m], q.Percentile))
 	}
 	resp.Coverage = a.coverage()
 	resp.BeaconBytes = beacon.Size()
@@ -119,8 +147,9 @@ func (a *API) handleSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
-// summarize turns one histogram into its reported figure.
-func summarize(m stats.Metric, h *stats.Histogram) metricSummary {
+// summarize turns one histogram into its reported figure. prev is the same
+// metric over the preceding window of equal length, and may be nil.
+func summarize(m stats.Metric, h, prev *stats.Histogram, q float64) metricSummary {
 	good, needs, _ := stats.Thresholds(m)
 
 	out := metricSummary{
@@ -131,11 +160,45 @@ func summarize(m stats.Metric, h *stats.Histogram) metricSummary {
 		Unit:             unitOf(m),
 		Band:             "",
 	}
-	if v, ok := h.Quantile(percentile); ok {
-		out.P75 = &v
+	if v, ok := h.Quantile(q); ok {
+		out.Value = &v
 		out.Band = stats.BandOf(m, v).String()
 	}
+	if prev != nil {
+		if v, ok := prev.Quantile(q); ok {
+			out.Previous = &v
+			out.PreviousSamples = prev.Count()
+		}
+	}
 	return out
+}
+
+// previous aggregates the window immediately before the requested one, of the
+// same length, so the dashboard can say whether a figure moved rather than only
+// what it is. It returns the histograms, the range covered, and the page views
+// in it.
+func (a *API) previous(q query) (map[stats.Metric]*stats.Histogram, store.Range, int) {
+	span := q.Range.To.Sub(q.Range.From)
+	rng := store.Range{From: q.Range.From.Add(-span), To: q.Range.From}
+
+	hists := make(map[stats.Metric]*stats.Histogram, len(stats.Metrics))
+	for _, m := range stats.Metrics {
+		hists[m] = stats.New(stats.LayoutOf(m))
+	}
+
+	total := 0
+	if span > 0 {
+		a.each(q, rng, func(rec store.Record) bool {
+			total++
+			for m, v := range rec.Values {
+				if h, ok := hists[m]; ok {
+					h.Add(v)
+				}
+			}
+			return true
+		})
+	}
+	return hists, rng, total
 }
 
 // unitOf returns the display unit for a metric. CLS is a unitless score.
@@ -155,11 +218,21 @@ func (a *API) coverage() *coverageSummary {
 	return c
 }
 
+// each scans the records a query selects. Naming a route uses the store's route
+// index, so the other routes are not walked at all.
+func (a *API) each(q query, rng store.Range, fn func(store.Record) bool) {
+	if q.Route != "" {
+		a.store.EachRoute(q.Route, rng, fn)
+		return
+	}
+	a.store.Each(rng, fn)
+}
+
 // seriesBucket is one time bucket of a series.
 type seriesBucket struct {
 	// At is the start of the bucket.
 	At      time.Time `json:"t"`
-	P75     *float64  `json:"p75"`
+	Value   *float64  `json:"value"`
 	Band    string    `json:"band"`
 	Samples uint64    `json:"samples"`
 }
@@ -203,7 +276,7 @@ func (a *API) handleSeries(w http.ResponseWriter, r *http.Request) {
 		hists[i] = stats.New(layout)
 	}
 
-	a.store.Each(rng, func(rec store.Record) bool {
+	a.each(q, rng, func(rec store.Record) bool {
 		v, ok := rec.Values[m]
 		if !ok {
 			return true
@@ -236,8 +309,8 @@ func (a *API) handleSeries(w http.ResponseWriter, r *http.Request) {
 			At:      rng.From.Add(time.Duration(i) * width),
 			Samples: h.Count(),
 		}
-		if v, ok := h.Quantile(percentile); ok {
-			b.P75 = &v
+		if v, ok := h.Quantile(q.Percentile); ok {
+			b.Value = &v
 			b.Band = stats.BandOf(m, v).String()
 		}
 		resp.Buckets[i] = b
@@ -249,7 +322,7 @@ func (a *API) handleSeries(w http.ResponseWriter, r *http.Request) {
 // groupRow is one row of a breakdown table.
 type groupRow struct {
 	Key     string   `json:"key"`
-	P75     *float64 `json:"p75"`
+	Value   *float64 `json:"value"`
 	Band    string   `json:"band"`
 	Samples uint64   `json:"samples"`
 }
@@ -285,7 +358,7 @@ func (a *API) handleGroup(w http.ResponseWriter, r *http.Request, key func(store
 	layout := stats.LayoutOf(m)
 	groups := make(map[string]*stats.Histogram)
 
-	a.store.Each(q.Range, func(rec store.Record) bool {
+	a.each(q, q.Range, func(rec store.Record) bool {
 		v, ok := rec.Values[m]
 		if !ok {
 			return true
@@ -312,8 +385,8 @@ func (a *API) handleGroup(w http.ResponseWriter, r *http.Request, key func(store
 	}
 	for k, h := range groups {
 		row := groupRow{Key: k, Samples: h.Count()}
-		if v, ok := h.Quantile(percentile); ok {
-			row.P75 = &v
+		if v, ok := h.Quantile(q.Percentile); ok {
+			row.Value = &v
 			row.Band = stats.BandOf(m, v).String()
 		}
 		resp.Rows = append(resp.Rows, row)
@@ -323,14 +396,14 @@ func (a *API) handleGroup(w http.ResponseWriter, r *http.Request, key func(store
 	sort.Slice(resp.Rows, func(i, j int) bool {
 		a, b := resp.Rows[i], resp.Rows[j]
 		switch {
-		case a.P75 == nil && b.P75 == nil:
+		case a.Value == nil && b.Value == nil:
 			return a.Key < b.Key
-		case a.P75 == nil:
+		case a.Value == nil:
 			return false
-		case b.P75 == nil:
+		case b.Value == nil:
 			return true
-		case *a.P75 != *b.P75:
-			return *a.P75 > *b.P75
+		case *a.Value != *b.Value:
+			return *a.Value > *b.Value
 		default:
 			return a.Key < b.Key
 		}

@@ -226,3 +226,72 @@ func TestRangeIsAlwaysBoundedAndSane(t *testing.T) {
 		}
 	}
 }
+
+func TestParseQueryPercentile(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    float64
+		wantErr bool
+	}{
+		{name: "default is p75", raw: "", want: 0.75},
+		{name: "median", raw: "p=50", want: 0.50},
+		{name: "p90", raw: "p=90", want: 0.90},
+		{name: "p95", raw: "p=95", want: 0.95},
+		{name: "unlisted quantile", raw: "p=99", wantErr: true},
+		{name: "fraction rather than percent", raw: "p=0.9", wantErr: true},
+		{name: "not a number", raw: "p=high", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, err := url.ParseQuery(tt.raw)
+			if err != nil {
+				t.Fatalf("ParseQuery(%q): %v", tt.raw, err)
+			}
+
+			q, err := parseQuery(v, refNow)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseQuery(%q) = %v, want an error", tt.raw, q.Percentile)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseQuery(%q): %v", tt.raw, err)
+			}
+			if q.Percentile != tt.want {
+				t.Errorf("Percentile = %v, want %v", q.Percentile, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseQueryRoute(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "absent", raw: "", want: ""},
+		{name: "path", raw: "route=%2Fpricing", want: "/pricing"},
+		{name: "trimmed", raw: "route=+%2Fpricing+", want: "/pricing"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, err := url.ParseQuery(tt.raw)
+			if err != nil {
+				t.Fatalf("ParseQuery(%q): %v", tt.raw, err)
+			}
+
+			q, err := parseQuery(v, refNow)
+			if err != nil {
+				t.Fatalf("parseQuery(%q): %v", tt.raw, err)
+			}
+			if q.Route != tt.want {
+				t.Errorf("Route = %q, want %q", q.Route, tt.want)
+			}
+		})
+	}
+}

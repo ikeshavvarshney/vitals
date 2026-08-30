@@ -194,3 +194,28 @@ func TestExportControlsAreWired(t *testing.T) {
 		t.Error("dash.js does not read /api/report; the export must not restitch the on-screen figures")
 	}
 }
+
+// TestAnalysisControlsAreWired covers the percentile selector and the route
+// filter the same way as the export controls: an id that exists in only one of
+// the two files is a control that does nothing.
+func TestAnalysisControlsAreWired(t *testing.T) {
+	html := assetBody(t, "/index.html")
+	js := assetBody(t, "/dash.js")
+
+	for _, id := range []string{"pct-group", "filter", "filter-route", "filter-clear", "scorecard-sub"} {
+		if !strings.Contains(html, `id="`+id+`"`) {
+			t.Errorf("index.html has no element with id %q", id)
+		}
+		if !strings.Contains(js, `'`+id+`'`) {
+			t.Errorf("dash.js never looks up id %q", id)
+		}
+	}
+
+	// The percentile and route filter must reach the server, not be applied to
+	// figures the server already computed at another quantile.
+	for _, param := range []string{"'&p=' + selectedPercentile", "'&route=' + encodeURIComponent(routeFilter)"} {
+		if !strings.Contains(js, param) {
+			t.Errorf("dash.js does not send %s with its queries", param)
+		}
+	}
+}

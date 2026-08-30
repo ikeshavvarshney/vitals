@@ -82,14 +82,27 @@ The route has its query string and fragment stripped before storage.
 
 ## 3. Query parameters
 
-Shared by all four read endpoints.
+Shared by all five read endpoints.
 
 | Parameter | Meaning | Default |
 |---|---|---|
 | `from` | Start of the window | 24 hours before `to` |
 | `to` | End of the window, exclusive | Now |
 | `metric` | One of `lcp`, `inp`, `cls`, `fcp`, `ttfb`, case-insensitive | `lcp` |
+| `p` | Percentile to report: `50`, `75`, `90`, or `95` | `75` |
 | `n` | Bucket count, `series` only, 1 to 720 | 48 |
+| `route` | Restrict every figure to one route, matched exactly | unset |
+
+`p` is a whole percentage, not a fraction: `p=90`, never `p=0.9`. The set is
+closed rather than free-form. A histogram cannot answer a quantile more finely
+than its buckets, and accepting `p=99.9` would invite reading a precision out of
+the answer that is not in the data.
+
+`route` matches the stored path exactly and is served from the store's route
+index, so the other routes are not scanned. Prefix or substring matching is not
+offered: it would quietly merge two pages into one figure. A route with no
+samples in the window returns an empty result, not `404`. A page can stop being
+visited, and that is data rather than an error.
 
 `from` and `to` each accept three forms:
 
@@ -118,26 +131,41 @@ All read responses are sent with `Cache-Control: no-store`.
   "from": "2026-08-29T12:00:00Z",
   "to": "2026-08-30T12:00:00Z",
   "samples": 1284,
+  "percentile": 0.75,
   "metrics": [
     {
       "metric": "lcp",
-      "p75": 1834.2,
+      "value": 1834.2,
       "band": "good",
       "samples": 1284,
+      "previous": 2260.8,
+      "previousSamples": 1190,
       "good": 2500,
       "needsImprovement": 4000,
       "unit": "ms"
     }
   ],
   "ingest": { "accepted": 1284, "malformed": 3, "tooLarge": 0, "storeErrors": 0 },
+  "compared": { "from": "2026-08-28T12:00:00Z", "to": "2026-08-29T12:00:00Z", "samples": 1190 },
   "coverage": { "total": 5012, "oldest": "2026-08-25T09:14:02Z", "newest": "2026-08-30T11:58:41Z" },
   "beaconBytes": 942
 }
 ```
 
-`p75` is `null` and `band` is `""` when no samples were collected for that
+`value` is the figure at the requested percentile. The field is not called `p75`
+because the percentile is selectable, and a key named `p75` holding a p90 would
+be wrong in every consumer that reads it. `percentile` echoes what was asked for,
+as a fraction.
+
+`value` is `null` and `band` is `""` when no samples were collected for that
 metric. This is deliberate: an unreported metric must not render as zero, which
 would present as a perfect score.
+
+`previous` is the same metric at the same percentile over the window immediately
+before this one, of equal length, and `compared` names that window. It is `null`
+when the earlier window holds no samples for the metric, which is why
+`previousSamples` ships beside it: a comparison against four page views is not a
+trend. The route filter applies to both windows.
 
 Metrics are returned in dashboard display order: LCP, INP, CLS, FCP, TTFB.
 Thresholds ship with each entry so the dashboard need not duplicate the
@@ -159,8 +187,8 @@ the dashboard can report the beacon's size without spending a request on it.
   "needsImprovement": 4000,
   "unit": "ms",
   "buckets": [
-    { "t": "2026-08-29T12:00:00Z", "p75": 1802.4, "band": "good", "samples": 41 },
-    { "t": "2026-08-29T12:30:00Z", "p75": null, "band": "", "samples": 0 }
+    { "t": "2026-08-29T12:00:00Z", "value": 1802.4, "band": "good", "samples": 41 },
+    { "t": "2026-08-29T12:30:00Z", "value": null, "band": "", "samples": 0 }
   ]
 }
 ```
@@ -187,8 +215,8 @@ class derived from viewport width: `mobile` at 767px and below, `tablet` to
   "needsImprovement": 4000,
   "unit": "ms",
   "rows": [
-    { "key": "/pricing", "p75": 6100, "band": "poor", "samples": 88 },
-    { "key": "/", "p75": 1834.2, "band": "good", "samples": 940 }
+    { "key": "/pricing", "value": 6100, "band": "poor", "samples": 88 },
+    { "key": "/", "value": 1834.2, "band": "good", "samples": 940 }
   ]
 }
 ```
@@ -204,8 +232,9 @@ once, so a window can be copied out of the browser or fetched by a script
 without issuing five requests and stitching them together. The dashboard's
 export buttons read this endpoint.
 
-It takes the same `from` and `to` parameters as the rest of the read path, and
-ignores `metric` and `n`.
+It takes the same `from`, `to`, `p`, and `route` parameters as the rest of the
+read path, and ignores `metric` and `n`. `quantiles` always carries p50, p75,
+p90, and p95 whatever `p` asks for; `p` selects only which one `band` rates.
 
 ```json
 {
@@ -232,10 +261,10 @@ ignores `metric` and `n`.
       "relativeError": 0.0488,
       "absoluteError": 0,
       "worstRoutes": [
-        { "key": "/pricing", "p75": 6100, "band": "poor", "samples": 88 }
+        { "key": "/pricing", "value": 6100, "band": "poor", "samples": 88 }
       ],
       "worstDevices": [
-        { "key": "mobile", "p75": 4900, "band": "poor", "samples": 402 }
+        { "key": "mobile", "value": 4900, "band": "poor", "samples": 402 }
       ]
     }
   ],
@@ -264,7 +293,7 @@ Notes on the fields that are not in the other endpoints:
 
 ## 8. Accuracy
 
-Every `p75` in this API is an approximation read off histogram buckets, not an
+Every `value` in this API is an approximation read off histogram buckets, not an
 exact order statistic. For millisecond metrics the error is bounded at **4.9%
 relative**; for CLS it is **0.0025 absolute**. See
 [`storage.md`](storage.md#3-percentiles) for the arithmetic.

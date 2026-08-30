@@ -22,18 +22,30 @@ const (
 // defaultWindow is the range used when the request names neither end.
 const defaultWindow = 24 * time.Hour
 
+// selectablePercentiles are the quantiles a request may ask for. Core Web
+// Vitals is assessed at the 75th, which stays the default; the others are for
+// looking at the tail, which is where a p75 that looks fine can still hide a
+// slow slice of visits. The set is closed because a histogram cannot answer a
+// quantile more finely than its buckets, and an arbitrary one invites reading
+// precision into the answer that is not there.
+var selectablePercentiles = []int{50, 75, 90, 95}
+
 // query is a parsed and validated set of request parameters.
 type query struct {
 	Range   store.Range
 	Metric  stats.Metric
 	Buckets int
+	// Percentile is the quantile to report, in (0, 1).
+	Percentile float64
+	// Route, when set, restricts every figure to one route.
+	Route string
 }
 
 // parseQuery reads the parameters shared by every endpoint. Anything
 // unparseable is an error rather than a silent default: a dashboard showing the
 // wrong window without saying so is worse than one showing an error.
 func parseQuery(v url.Values, now time.Time) (query, error) {
-	q := query{Buckets: defaultBuckets}
+	q := query{Buckets: defaultBuckets, Percentile: percentile}
 
 	from, err := parseTime(v.Get("from"), now)
 	if err != nil {
@@ -67,6 +79,21 @@ func parseQuery(v url.Values, now time.Time) (query, error) {
 		}
 		q.Metric = m
 	}
+
+	if s := v.Get("p"); s != "" {
+		p, err := strconv.Atoi(s)
+		if err != nil {
+			return query{}, fmt.Errorf("p: %w", err)
+		}
+		if !allowedPercentile(p) {
+			return query{}, fmt.Errorf("p: %d is not one of %v", p, selectablePercentiles)
+		}
+		q.Percentile = float64(p) / 100
+	}
+
+	// A route filter is matched exactly. Substring or prefix matching would
+	// silently mix two pages into one figure.
+	q.Route = strings.TrimSpace(v.Get("route"))
 
 	if s := v.Get("n"); s != "" {
 		n, err := strconv.Atoi(s)
@@ -133,6 +160,16 @@ func endsWithLetter(s string) bool {
 	}
 	c := s[len(s)-1]
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// allowedPercentile reports whether p is one of the selectable quantiles.
+func allowedPercentile(p int) bool {
+	for _, ok := range selectablePercentiles {
+		if p == ok {
+			return true
+		}
+	}
+	return false
 }
 
 // requireMetric returns the query's metric, defaulting to LCP.

@@ -86,8 +86,12 @@ Verified against real sites in Chrome 152. Other browsers are untested.
 
 - Collects the five Core Web Vitals with `PerformanceObserver`
 - Ingests over HTTP, stores on local disk, survives restart
-- Dashboard with p75 per metric, banded good / needs improvement / poor
-- Time series and per-route breakdown
+- Dashboard with p50, p75, p90 or p95 per metric, banded good / needs
+  improvement / poor
+- Each figure compared with the window immediately before it, so a regression
+  is visible rather than inferred
+- Time series and per-route breakdown, with any route usable as a filter for
+  the whole page
 - Export a window as JSON, or as a prompt for an AI agent to read
 - One binary, one data directory, no external services
 

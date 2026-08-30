@@ -71,6 +71,7 @@ type reportResponse struct {
 	To          time.Time        `json:"to"`
 	WindowHours float64          `json:"windowHours"`
 	Percentile  float64          `json:"headlinePercentile"`
+	Route       string           `json:"route,omitempty"`
 	Samples     int              `json:"pageViews"`
 	Metrics     []reportMetric   `json:"metrics"`
 	Ingest      ingest.Counters  `json:"ingest"`
@@ -113,7 +114,7 @@ func (a *API) handleReport(w http.ResponseWriter, r *http.Request) {
 
 	agg := newReportAggregator()
 	total := 0
-	a.store.Each(q.Range, func(rec store.Record) bool {
+	a.each(q, q.Range, func(rec store.Record) bool {
 		total++
 		agg.add(rec)
 		return true
@@ -124,9 +125,10 @@ func (a *API) handleReport(w http.ResponseWriter, r *http.Request) {
 		From:        q.Range.From,
 		To:          q.Range.To,
 		WindowHours: q.Range.To.Sub(q.Range.From).Hours(),
-		Percentile:  percentile,
+		Percentile:  q.Percentile,
+		Route:       q.Route,
 		Samples:     total,
-		Metrics:     agg.metrics(),
+		Metrics:     agg.metrics(q.Percentile),
 		Ingest:      a.counters(),
 		Coverage:    a.coverage(),
 		BeaconBytes: beacon.Size(),
@@ -193,8 +195,9 @@ func groupFor(group map[string]*stats.Histogram, key string, m stats.Metric) *st
 	return h
 }
 
-// metrics renders the accumulated state as the report's metric entries.
-func (agg *reportAggregator) metrics() []reportMetric {
+// metrics renders the accumulated state as the report's metric entries. band is
+// rated at the requested quantile, which is what the dashboard is showing.
+func (agg *reportAggregator) metrics(q float64) []reportMetric {
 	out := make([]reportMetric, 0, len(stats.Metrics))
 
 	for _, m := range stats.Metrics {
@@ -212,17 +215,17 @@ func (agg *reportAggregator) metrics() []reportMetric {
 			Distribution:     *agg.bands[m],
 			RelativeError:    h.RelativeError(),
 			AbsoluteError:    h.AbsoluteError(),
-			WorstRoutes:      topRows(agg.routes[m], m),
-			WorstDevices:     topRows(agg.devices[m], m),
+			WorstRoutes:      topRows(agg.routes[m], m, q),
+			WorstDevices:     topRows(agg.devices[m], m, q),
 		}
 
 		if h.Count() > 0 {
-			for _, q := range reportQuantiles {
-				if v, ok := h.Quantile(q.q); ok {
-					entry.Quantiles[q.name] = v
+			for _, rq := range reportQuantiles {
+				if v, ok := h.Quantile(rq.q); ok {
+					entry.Quantiles[rq.name] = v
 				}
 			}
-			if v, ok := h.Quantile(percentile); ok {
+			if v, ok := h.Quantile(q); ok {
 				entry.Band = stats.BandOf(m, v).String()
 			}
 			min, max, mean := h.Min(), h.Max(), h.Mean()
@@ -235,12 +238,12 @@ func (agg *reportAggregator) metrics() []reportMetric {
 }
 
 // topRows returns the slowest groups, worst first, capped at breakdownLimit.
-func topRows(group map[string]*stats.Histogram, m stats.Metric) []groupRow {
+func topRows(group map[string]*stats.Histogram, m stats.Metric, q float64) []groupRow {
 	rows := make([]groupRow, 0, len(group))
 	for k, h := range group {
 		row := groupRow{Key: k, Samples: h.Count()}
-		if v, ok := h.Quantile(percentile); ok {
-			row.P75 = &v
+		if v, ok := h.Quantile(q); ok {
+			row.Value = &v
 			row.Band = stats.BandOf(m, v).String()
 		}
 		rows = append(rows, row)
@@ -250,14 +253,14 @@ func topRows(group map[string]*stats.Histogram, m stats.Metric) []groupRow {
 	sort.Slice(rows, func(i, j int) bool {
 		a, b := rows[i], rows[j]
 		switch {
-		case a.P75 == nil && b.P75 == nil:
+		case a.Value == nil && b.Value == nil:
 			return a.Key < b.Key
-		case a.P75 == nil:
+		case a.Value == nil:
 			return false
-		case b.P75 == nil:
+		case b.Value == nil:
 			return true
-		case *a.P75 != *b.P75:
-			return *a.P75 > *b.P75
+		case *a.Value != *b.Value:
+			return *a.Value > *b.Value
 		default:
 			return a.Key < b.Key
 		}

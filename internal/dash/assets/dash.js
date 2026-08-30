@@ -20,6 +20,11 @@
     counters: document.getElementById('counters'),
     windowSel: document.getElementById('window'),
     metricGroup: document.getElementById('metric-group'),
+    pctGroup: document.getElementById('pct-group'),
+    scorecardSub: document.getElementById('scorecard-sub'),
+    filter: document.getElementById('filter'),
+    filterRoute: document.getElementById('filter-route'),
+    filterClear: document.getElementById('filter-clear'),
     refresh: document.getElementById('refresh'),
     snapLink: document.getElementById('snap-link'),
     copyJSON: document.getElementById('copy-json'),
@@ -41,7 +46,13 @@
   var metricByKey = {};
   METRICS.forEach(function (m) { metricByKey[m.key] = m; });
 
+  // PERCENTILES matches the set the API accepts. p75 is what Core Web Vitals is
+  // assessed on; the others are for looking at the tail a p75 can hide.
+  var PERCENTILES = [50, 75, 90, 95];
+
   var selectedMetric = 'lcp';
+  var selectedPercentile = 75;
+  var routeFilter = '';
 
   // ---------------------------------------------------------------- helpers
 
@@ -106,6 +117,23 @@
     else el.status.removeAttribute('data-state');
   }
 
+  // ordinal labels the selected quantile in prose.
+  function ordinal(p) {
+    if (p % 10 === 1 && p % 100 !== 11) return p + 'st';
+    if (p % 10 === 2 && p % 100 !== 12) return p + 'nd';
+    if (p % 10 === 3 && p % 100 !== 13) return p + 'rd';
+    return p + 'th';
+  }
+
+  // params builds the query string every endpoint shares, so the window, the
+  // quantile, and the route filter cannot drift apart between panels.
+  function params() {
+    var q = 'from=' + encodeURIComponent(el.windowSel.value) +
+      '&p=' + selectedPercentile;
+    if (routeFilter) q += '&route=' + encodeURIComponent(routeFilter);
+    return q;
+  }
+
   function getJSON(url) {
     return fetch(url, { headers: { accept: 'application/json' } }).then(function (r) {
       return r.json().then(function (body) {
@@ -139,6 +167,44 @@
     });
   }
 
+  function buildPercentileSelector() {
+    clear(el.pctGroup);
+
+    PERCENTILES.forEach(function (p) {
+      var b = h('button', {
+        type: 'button',
+        role: 'radio',
+        'aria-checked': p === selectedPercentile ? 'true' : 'false',
+        title: 'Report the ' + ordinal(p) + ' percentile',
+        text: 'p' + p
+      });
+      b.addEventListener('click', function () {
+        if (selectedPercentile === p) return;
+        selectedPercentile = p;
+        buildPercentileSelector();
+        load();
+      });
+      el.pctGroup.appendChild(b);
+    });
+  }
+
+  // ---------------------------------------------------------- route filter
+
+  // setRoute narrows every panel to one route, or clears the filter when passed
+  // an empty string. The breakdown tables stay visible so the filtered state is
+  // legible rather than an unexplained drop in every number.
+  function setRoute(route) {
+    if (routeFilter === route) return;
+    routeFilter = route;
+    renderFilter();
+    load();
+  }
+
+  function renderFilter() {
+    el.filter.hidden = !routeFilter;
+    el.filterRoute.textContent = routeFilter;
+  }
+
   // ------------------------------------------------------------- scorecard
 
   // trackFor renders where a value sits across the three bands. The scale runs
@@ -155,16 +221,46 @@
       h('div', { class: 'track-seg poor', style: 'width:' + (100 - goodPct - needsPct) + '%' })
     ]);
 
-    if (m.p75 !== null) {
-      var pos = Math.min(100, Math.max(0, (m.p75 / scaleMax) * 100));
+    if (m.value !== null) {
+      var pos = Math.min(100, Math.max(0, (m.value / scaleMax) * 100));
       bar.appendChild(h('div', {
         class: 'track-marker',
         style: 'left:' + pos + '%',
-        title: formatValue(m.p75, m.unit) + ' against ' +
+        title: formatValue(m.value, m.unit) + ' against ' +
           formatValue(m.good, m.unit) + ' and ' + formatValue(m.needsImprovement, m.unit)
       }));
     }
     return bar;
+  }
+
+  // deltaFor compares a metric with the same figure over the window immediately
+  // before this one. Every metric here is better when lower, so a rise is a
+  // regression. Movement under 2% is reported as flat: the percentile is
+  // bucketed, and a smaller difference can be an artefact of the buckets rather
+  // than a change in what visitors experienced.
+  function deltaFor(m) {
+    if (m.value === null || m.previous === null || m.previous === undefined) {
+      return h('span', {
+        class: 'delta none',
+        title: 'The previous window of the same length holds no samples for this metric',
+        text: 'no comparison'
+      });
+    }
+
+    var pct = ((m.value - m.previous) / m.previous) * 100;
+    var state = Math.abs(pct) < 2 ? 'flat' : (pct > 0 ? 'worse' : 'better');
+    var sign = pct > 0 ? '+' : (pct < 0 ? '-' : '');
+    var text = state === 'flat'
+      ? 'flat'
+      : sign + Math.abs(pct).toFixed(pct >= 100 ? 0 : 1) + '%';
+
+    return h('span', {
+      class: 'delta ' + state,
+      title: 'Previous window: ' + formatValue(m.previous, m.unit) +
+        unitLabel(m.previous, m.unit) + ' from ' + m.previousSamples +
+        (m.previousSamples === 1 ? ' sample' : ' samples'),
+      text: text + ' vs before'
+    });
   }
 
   function renderScorecard(data) {
@@ -172,13 +268,13 @@
 
     data.metrics.forEach(function (m) {
       var meta = metricByKey[m.metric] || { label: m.metric, name: '' };
-      var value = formatValue(m.p75, m.unit);
+      var value = formatValue(m.value, m.unit);
 
       var valueNode = value === null
         ? h('div', { class: 'card-value empty', text: 'No data' })
         : h('div', { class: 'card-value' }, [
             h('span', { text: value }),
-            h('span', { class: 'unit', text: unitLabel(m.p75, m.unit) })
+            h('span', { class: 'unit', text: unitLabel(m.value, m.unit) })
           ]);
 
       var samples = m.samples === 1
@@ -202,7 +298,8 @@
             text: m.band ? m.band.replace('-', ' ') : 'no data'
           }),
           h('span', { class: 'card-samples', text: samples })
-        ])
+        ]),
+        h('div', { class: 'card-delta' }, [deltaFor(m)])
       ]));
     });
   }
@@ -215,7 +312,7 @@
     clear(el.series);
     el.seriesReadout.classList.remove('on');
 
-    var points = data.buckets.filter(function (b) { return b.p75 !== null; });
+    var points = data.buckets.filter(function (b) { return b.value !== null; });
     if (points.length === 0) {
       el.series.appendChild(h('p', {
         class: 'empty',
@@ -231,7 +328,7 @@
 
     // The scale always covers the good threshold, so a healthy chart still
     // shows where the limit is rather than zooming into noise.
-    var peak = points.reduce(function (a, b) { return Math.max(a, b.p75); }, 0);
+    var peak = points.reduce(function (a, b) { return Math.max(a, b.value); }, 0);
     var maxValue = Math.max(data.good * 1.25, peak * 1.15);
 
     var n = data.buckets.length;
@@ -299,11 +396,11 @@
     // interpolating a value nobody measured.
     var runs = [], run = [];
     data.buckets.forEach(function (b, i) {
-      if (b.p75 === null) {
+      if (b.value === null) {
         if (run.length) { runs.push(run); run = []; }
         return;
       }
-      run.push({ x: x(i), y: y(b.p75), b: b });
+      run.push({ x: x(i), y: y(b.value), b: b });
     });
     if (run.length) runs.push(run);
 
@@ -362,7 +459,7 @@
       var vx = ((clientX - box.left) / box.width) * CHART.w;
       var best = -1, bestDist = Infinity;
       data.buckets.forEach(function (b, i) {
-        if (b.p75 === null) return;
+        if (b.value === null) return;
         var d = Math.abs(x(i) - vx);
         if (d < bestDist) { bestDist = d; best = i; }
       });
@@ -377,8 +474,8 @@
       cursor.setAttribute('x2', x(i));
       cursor.setAttribute('opacity', 1);
       el.seriesReadout.textContent =
-        formatDateTime(b.t) + '   ' + formatValue(b.p75, data.unit) +
-        unitLabel(b.p75, data.unit) + '   n=' + b.samples;
+        formatDateTime(b.t) + '   ' + formatValue(b.value, data.unit) +
+        unitLabel(b.value, data.unit) + '   n=' + b.samples;
       el.seriesReadout.classList.add('on');
     });
 
@@ -390,7 +487,9 @@
 
   // ---------------------------------------------------------------- tables
 
-  function renderTable(table, data, keyHeading, emptyText) {
+  // renderTable draws a breakdown. When onPick is given, each key becomes a
+  // button that narrows the whole page to that row.
+  function renderTable(table, data, keyHeading, emptyText, onPick) {
     clear(table);
     table.appendChild(h('caption', { class: 'visually-hidden', text: keyHeading }));
 
@@ -403,25 +502,40 @@
 
     table.appendChild(h('thead', {}, [h('tr', {}, [
       h('th', { text: keyHeading }),
-      h('th', { text: 'p75' }),
+      h('th', { text: 'p' + selectedPercentile }),
       h('th', { text: 'Relative' }),
       h('th', { text: 'Samples' })
     ])]));
 
     var worst = data.rows.reduce(function (a, r) {
-      return Math.max(a, r.p75 === null ? 0 : r.p75);
+      return Math.max(a, r.value === null ? 0 : r.value);
     }, 0) || 1;
 
     var body = h('tbody', {});
     data.rows.forEach(function (row) {
-      var value = formatValue(row.p75, data.unit);
-      var pct = row.p75 === null ? 0 : Math.max(2, (row.p75 / worst) * 100);
+      var value = formatValue(row.value, data.unit);
+      var pct = row.value === null ? 0 : Math.max(2, (row.value / worst) * 100);
+
+      var label = row.key || '(unknown)';
+      var keyCell;
+      if (onPick) {
+        var pick = h('button', {
+          type: 'button',
+          class: 'key-pick',
+          title: 'Show only ' + label,
+          text: label
+        });
+        pick.addEventListener('click', function () { onPick(row.key); });
+        keyCell = h('td', { class: 'key' }, [pick]);
+      } else {
+        keyCell = h('td', { class: 'key', text: label });
+      }
 
       body.appendChild(h('tr', {}, [
-        h('td', { class: 'key', text: row.key || '(unknown)' }),
+        keyCell,
         h('td', {
           class: 'num',
-          text: value === null ? '-' : value + unitLabel(row.p75, data.unit)
+          text: value === null ? '-' : value + unitLabel(row.value, data.unit)
         }),
         h('td', { class: 'meter' }, [
           h('div', {
@@ -594,7 +708,7 @@
   // The report endpoint answers for all five metrics at once, so the export is
   // a separate request rather than a stitching together of what is on screen.
   function fetchReport() {
-    return getJSON('/api/report?from=' + encodeURIComponent(el.windowSel.value));
+    return getJSON('/api/report?' + params());
   }
 
   function exportStatus(text, state) {
@@ -672,105 +786,92 @@
   // reading renders one value the way the prompt should carry it: a number with
   // its unit, or an explicit marker that nothing was measured.
   function reading(v, unit) {
-    if (v === null || v === undefined) return 'not measured';
+    if (v === null || v === undefined) return '-';
     return formatValue(v, unit) + unitLabel(v, unit);
   }
 
-  function rowsLine(rows, unit) {
-    if (!rows || !rows.length) return 'none';
-    return rows.map(function (r) {
-      return r.key + ' ' + reading(r.p75, unit) + ' (n=' + r.samples + ')';
-    }).join(', ');
+  // worstOf names the slowest group and its figure, or nothing when a metric
+  // has only one group and the comparison would be noise.
+  function worstOf(rows, unit) {
+    if (!rows || rows.length < 2) return '-';
+    return rows[0].key + ' ' + reading(rows[0].value, unit);
   }
 
-  // buildPrompt turns a report into text an agent can act on. It states what the
-  // numbers are, what they are not, and what answer is wanted; a bare dump of
-  // figures gets a bare guess back.
+  function shortTime(iso) {
+    return iso.slice(0, 16).replace('T', ' ') + 'Z';
+  }
+
+  // buildPrompt turns a report into text an agent can act on. It is deliberately
+  // compact: a page of prose gets skimmed, and a long paste is awkward to move
+  // between tools. One line per metric, the caveats in one line, and a short
+  // instruction that says what the data cannot answer.
   function buildPrompt(report) {
     var lines = [];
+    var pk = 'p' + Math.round(report.headlinePercentile * 100);
 
-    lines.push('You are a web performance engineer. Below is Core Web Vitals field data');
-    lines.push('from real page views of my site, collected by vitals, a self-hosted RUM tool.');
-    lines.push('Tell me what to fix and in what order.');
+    lines.push('Core Web Vitals field data from my site, real page views, collected by a ' +
+      'self-hosted RUM tool. Tell me what to fix, in order.');
     lines.push('');
-    lines.push('## Window');
-    lines.push(report.from + ' to ' + report.to + ' (' +
-      Math.round(report.windowHours) + 'h), ' + report.pageViews + ' page views.');
-    lines.push('Headline figures are the ' + Math.round(report.headlinePercentile * 100) +
-      'th percentile, which is what Core Web Vitals is assessed on.');
+    lines.push(shortTime(report.from) + ' to ' + shortTime(report.to) + ', ' +
+      Math.round(report.windowHours) + 'h, ' + report.pageViews + ' page views' +
+      (report.route ? ', route ' + report.route + ' only' : '') + '. ' +
+      'Headline figures are ' + pk + '. Targets are the published thresholds.');
     lines.push('');
-    lines.push('## Metrics');
+    lines.push('metric | p50 | ' + pk + ' | p95 | worst | rating | target | good/ni/poor | worst route | worst device');
 
     report.metrics.forEach(function (m) {
-      var unit = m.unit;
-      lines.push('');
-      lines.push('### ' + m.metric.toUpperCase() + ' - ' + m.name);
-
+      var u = m.unit;
       if (!m.samples) {
-        lines.push('No samples in this window. Absent, not fast.');
+        lines.push(m.metric.toUpperCase() + ' | no samples in this window (absent, not fast)');
         return;
       }
-
       var q = m.quantiles || {};
-      lines.push('p50 ' + reading(q.p50, unit) +
-        ' | p75 ' + reading(q.p75, unit) +
-        ' | p90 ' + reading(q.p90, unit) +
-        ' | p95 ' + reading(q.p95, unit) +
-        ' | worst ' + reading(m.max, unit));
-      lines.push('Rating at p75: ' + (m.band || 'unknown') +
-        '. Good is at or below ' + reading(m.good, unit) +
-        ', poor is above ' + reading(m.needsImprovement, unit) + '.');
-
       var d = m.distribution;
-      var pct = function (n) { return Math.round((n / m.samples) * 100) + '%'; };
-      lines.push('Of ' + m.samples + ' samples: ' +
-        d.good + ' good (' + pct(d.good) + '), ' +
-        d.needsImprovement + ' needs improvement (' + pct(d.needsImprovement) + '), ' +
-        d.poor + ' poor (' + pct(d.poor) + '). These counts are exact.');
-      lines.push('Worst routes: ' + rowsLine(m.worstRoutes, unit));
-      lines.push('Worst device classes: ' + rowsLine(m.worstDevices, unit));
+      lines.push([
+        m.metric.toUpperCase(),
+        reading(q.p50, u),
+        reading(q[pk], u),
+        reading(q.p95, u),
+        reading(m.max, u),
+        m.band || '-',
+        '<=' + reading(m.good, u),
+        d.good + '/' + d.needsImprovement + '/' + d.poor + ' of ' + m.samples,
+        worstOf(m.worstRoutes, u),
+        worstOf(m.worstDevices, u)
+      ].join(' | '));
     });
 
     lines.push('');
-    lines.push('## Collection health');
-    lines.push('accepted ' + report.ingest.accepted +
-      ', malformed ' + report.ingest.malformed +
-      ', too large ' + report.ingest.tooLarge +
-      ', store errors ' + report.ingest.storeErrors +
-      ', records held ' + (report.coverage ? report.coverage.total : 0) + '.');
-
+    lines.push('Caveats: percentiles are bucketed, not exact (+/-4.9% on ms metrics, ' +
+      '+/-0.0025 on CLS); band counts are exact; INP here is the longest event over ' +
+      '16ms, not real INP, so it is pessimistic; device class comes from viewport ' +
+      'width, not the user agent.');
     lines.push('');
-    lines.push('## What this data is not');
-    report.caveats.forEach(function (c) { lines.push('- ' + c); });
+    lines.push('Answer with: the two or three metrics worth working on and what in these ' +
+      'numbers says so; causes consistent with the split across routes, devices and ' +
+      'percentiles, separating what the data supports from what it merely permits; ' +
+      'changes ranked by effect against effort, each naming the metric it should move. ' +
+      'This is field data only: no waterfall, no resource list, no element attribution. ' +
+      'Do not guess my stack, ask. If the samples are too few to support a conclusion, ' +
+      'say that instead of drawing one.');
 
-    lines.push('');
-    lines.push('## What I want back');
-    lines.push('1. The two or three metrics worth working on, and why these numbers say so.');
-    lines.push('2. For each, the likely causes that are consistent with the split between');
-    lines.push('   routes, device classes, and percentiles above. Say which cause the data');
-    lines.push('   supports and which it merely permits.');
-    lines.push('3. Concrete changes, ordered by expected effect against effort, each naming');
-    lines.push('   the metric it should move and roughly how far.');
-    lines.push('4. What further evidence would confirm or kill each hypothesis, given that');
-    lines.push('   this is field data with no waterfall and no element attribution.');
-    lines.push('');
-    lines.push('Do not guess at my stack or my code. Ask for what you need, or say what');
-    lines.push('you would need to look at. If the sample count is too small to support a');
-    lines.push('conclusion, say that instead of drawing one.');
-
-    return lines.join('\n');
+    return lines.join('
+');
   }
 
   // ------------------------------------------------------------------ load
 
   function load() {
-    var win = el.windowSel.value;
     var metric = selectedMetric;
-    var q = 'from=' + encodeURIComponent(win);
+    var q = params();
     var meta = metricByKey[metric];
 
     setStatus('Loading');
     el.seriesSub.textContent = meta ? meta.name : '';
+    document.getElementById('open-json').href = '/api/report?' + q;
+    el.scorecardSub.textContent = ordinal(selectedPercentile) +
+      ' percentile across the selected window' +
+      (routeFilter ? ', for ' + routeFilter : '');
 
     Promise.all([
       getJSON('/api/summary?' + q),
@@ -782,7 +883,9 @@
       renderCounters(r[0]);
       renderBeaconSize(r[0].beaconBytes);
       renderSeries(r[1]);
-      renderTable(el.routes, r[2], 'Route', 'No routes reported in this window.');
+      // The route table stays pickable while filtered, so a wrong pick is one
+      // click from a different one rather than a trip through Clear filter.
+      renderTable(el.routes, r[2], 'Route', 'No routes reported in this window.', setRoute);
       renderTable(el.devices, r[3], 'Device', 'No devices reported in this window.');
 
       var total = r[0].samples;
@@ -797,11 +900,14 @@
     exportStatus('');
     load();
   });
+  el.filterClear.addEventListener('click', function () { setRoute(''); });
   el.copyJSON.addEventListener('click', copyJSON);
   el.downloadJSON.addEventListener('click', downloadJSON);
   el.copyPrompt.addEventListener('click', copyPrompt);
 
   buildMetricSelector();
+  buildPercentileSelector();
+  renderFilter();
   renderLedger();
   renderBookmarklet();
   load();

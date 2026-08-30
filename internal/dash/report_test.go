@@ -148,10 +148,10 @@ func TestReportBreakdownsAreWorstFirst(t *testing.T) {
 	if lcp.WorstRoutes[0].Key != "/slow" {
 		t.Errorf("WorstRoutes[0] = %q, want %q", lcp.WorstRoutes[0].Key, "/slow")
 	}
-	if lcp.WorstRoutes[0].P75 == nil || lcp.WorstRoutes[1].P75 == nil {
+	if lcp.WorstRoutes[0].Value == nil || lcp.WorstRoutes[1].Value == nil {
 		t.Fatal("a route with samples reported a null p75")
 	}
-	if *lcp.WorstRoutes[0].P75 < *lcp.WorstRoutes[1].P75 {
+	if *lcp.WorstRoutes[0].Value < *lcp.WorstRoutes[1].Value {
 		t.Errorf("routes are not worst first: %v", lcp.WorstRoutes)
 	}
 
