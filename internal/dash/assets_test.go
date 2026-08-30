@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"vitals/internal/httpx"
 )
 
 // assetBody fetches one embedded asset and returns its body.
@@ -216,6 +218,32 @@ func TestAnalysisControlsAreWired(t *testing.T) {
 	for _, param := range []string{"'&p=' + selectedPercentile", "'&route=' + encodeURIComponent(routeFilter)"} {
 		if !strings.Contains(js, param) {
 			t.Errorf("dash.js does not send %s with its queries", param)
+		}
+	}
+}
+
+// TestDashboardAssetsRevalidate guards the caching policy the dashboard needs.
+// Its scripts change under a stable name, so a browser that reuses one for an
+// hour without asking will keep running a version that has been fixed.
+func TestDashboardAssetsRevalidate(t *testing.T) {
+	h, err := Assets()
+	if err != nil {
+		t.Fatalf("Assets: %v", err)
+	}
+
+	for _, target := range []string{"/dash.js", "/dash.css", "/snapshot.js"} {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d, want 200", target, rec.Code)
+		}
+		if got := rec.Header().Get("Cache-Control"); got != httpx.CacheRevalidate {
+			t.Errorf("%s Cache-Control = %q, want %q", target, got, httpx.CacheRevalidate)
+		}
+		if rec.Header().Get("ETag") == "" {
+			t.Errorf("%s has no ETag, so revalidation cannot answer 304", target)
 		}
 	}
 }

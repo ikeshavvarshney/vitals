@@ -507,3 +507,30 @@ func TestMatchesETag(t *testing.T) {
 		}
 	}
 }
+
+func TestCachePolicyIsPerFileServer(t *testing.T) {
+	fsys := fstest.MapFS{
+		"index.html": {Data: []byte("<!doctype html><title>t</title>")},
+		"app.js":     {Data: []byte("console.log(1)")},
+	}
+
+	cached, err := NewFileServer(fsys)
+	if err != nil {
+		t.Fatalf("NewFileServer: %v", err)
+	}
+	if got := get(cached, http.MethodGet, "/app.js", nil).Header().Get("Cache-Control"); got != cacheAsset {
+		t.Errorf("default script policy = %q, want %q", got, cacheAsset)
+	}
+
+	revalidating, err := NewFileServerCached(fsys, CacheRevalidate)
+	if err != nil {
+		t.Fatalf("NewFileServerCached: %v", err)
+	}
+	if got := get(revalidating, http.MethodGet, "/app.js", nil).Header().Get("Cache-Control"); got != CacheRevalidate {
+		t.Errorf("revalidating script policy = %q, want %q", got, CacheRevalidate)
+	}
+	// HTML revalidates whatever the asset policy is.
+	if got := get(revalidating, http.MethodGet, "/index.html", nil).Header().Get("Cache-Control"); got != cacheHTML {
+		t.Errorf("HTML policy = %q, want %q", got, cacheHTML)
+	}
+}

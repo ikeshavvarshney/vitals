@@ -124,6 +124,13 @@ Anything unparseable returns `400` with a JSON body naming the parameter:
 
 All read responses are sent with `Cache-Control: no-store`.
 
+Static assets carry an ETag and are conditional-request friendly. The beacon and
+the demo site are cached for an hour; the dashboard's own `dash.js`, `dash.css`,
+and `snapshot.js` are sent `no-cache`, so a browser revalidates them and a 304
+costs one small request. Their names carry no content hash, and an hour of
+unrevalidated caching means a corrected script that an open dashboard will not
+pick up until the hour is out.
+
 ## 4. `GET /api/summary`
 
 ```json

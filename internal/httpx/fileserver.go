@@ -24,6 +24,17 @@ const (
 	cacheAsset = "public, max-age=3600"
 )
 
+// CacheRevalidate is the policy for a file set whose contents change under a
+// stable name. The response is still cached, but the browser checks the ETag
+// before reusing it, which costs one 304 and never serves a stale file.
+//
+// The dashboard's own scripts use this. Their names carry no content hash, so
+// an hour of unrevalidated caching means a fixed script that a browser will not
+// pick up until the hour is out. The beacon keeps the longer policy: it is
+// requested by every page view of the instrumented site, where a conditional
+// request per view is a real cost rather than a developer reloading a tool.
+const CacheRevalidate = "no-cache"
+
 // asset is one file, prepared once at construction.
 type asset struct {
 	name         string
@@ -46,8 +57,16 @@ type FileServer struct {
 }
 
 // NewFileServer prepares a handler serving every file in fsys, at paths
-// relative to its root.
+// relative to its root. Non-HTML files are cached for an hour; use
+// [NewFileServerCached] with [CacheRevalidate] for a set that changes under a
+// stable name.
 func NewFileServer(fsys fs.FS) (*FileServer, error) {
+	return NewFileServerCached(fsys, cacheAsset)
+}
+
+// NewFileServerCached is [NewFileServer] with an explicit Cache-Control policy
+// for non-HTML files. HTML always revalidates.
+func NewFileServerCached(fsys fs.FS, assetCache string) (*FileServer, error) {
 	s := &FileServer{
 		assets: make(map[string]*asset),
 		index:  "index.html",
@@ -65,7 +84,7 @@ func NewFileServer(fsys fs.FS) (*FileServer, error) {
 		if err != nil {
 			return fmt.Errorf("reading asset %s: %w", p, err)
 		}
-		s.assets["/"+p] = newAsset(p, body)
+		s.assets["/"+p] = newAsset(p, body, assetCache)
 		return nil
 	})
 	if err != nil {
@@ -90,17 +109,17 @@ func NewFileServerFromMap(files map[string][]byte) (*FileServer, error) {
 		index:  "index.html",
 	}
 	for name, body := range files {
-		s.assets["/"+strings.TrimPrefix(name, "/")] = newAsset(name, body)
+		s.assets["/"+strings.TrimPrefix(name, "/")] = newAsset(name, body, cacheAsset)
 	}
 	return s, nil
 }
 
 // newAsset prepares one file: media type, cache policy, entity tag, and a gzip
 // encoding when that is smaller.
-func newAsset(name string, body []byte) *asset {
+func newAsset(name string, body []byte, assetCache string) *asset {
 	ct := ContentType(name)
 
-	cache := cacheAsset
+	cache := assetCache
 	if strings.HasPrefix(ct, "text/html") {
 		cache = cacheHTML
 	}
