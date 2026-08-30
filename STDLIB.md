@@ -179,10 +179,10 @@ for.
 ## Beacon
 
 - **`web-vitals` (Google)** → `internal/beacon/beacon.src.js`, hand-written over
-  `PerformanceObserver`, 942 bytes raw and 571 gzipped. This is the headline
-  substitution: the tool that measures page weight adds 942 bytes to a page
-  instead of several kilobytes of someone else's JavaScript from someone else's
-  CDN.
+  `PerformanceObserver`, 942 bytes raw and 571 gzipped against 7,226 and 2,601
+  for `web-vitals` 4.2.4, both measured by `tools/compare` with the same
+  compressor. 7.7x smaller raw, 4.6x gzipped, and ours also carries the
+  transport that `web-vitals` leaves to the caller.
 
   Where theirs is better, specifically:
 

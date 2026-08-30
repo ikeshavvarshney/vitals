@@ -14,7 +14,7 @@ endif
 # nothing injects a timestamp or a git SHA. Those three facts are what make the
 # output byte-identical across rebuilds.
 
-.PHONY: all build run test race check beacon proof repro clean
+.PHONY: all build run test race check beacon compare proof repro clean
 
 all: build
 
@@ -46,6 +46,13 @@ check:
 ## beacon: print the beacon size and enforce the 1KB budget
 beacon:
 	go run ./tools/beaconsize
+
+## compare: print beacon size beside any scripts given in FILES
+#
+# Not part of the build and it fetches nothing. Download a competitor's script
+# first, then: make compare FILES="web-vitals.iife.js"
+compare:
+	go run ./tools/compare $(FILES)
 
 ## proof: regenerate deps-proof.txt
 proof:

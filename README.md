@@ -5,8 +5,10 @@ dependency manifest.
 
 The tool that measures page weight should not be page weight. A mainstream
 analytics snippet is 30-60KB of third-party JavaScript on every page view. This
-one is **942 bytes**, served from your own origin, and the backend it talks to
-has no database server, no driver, no charting library, and no framework.
+one is **942 bytes**, served from your own origin: 7.7x smaller than Google's
+`web-vitals`, and it includes the transport that `web-vitals` leaves to you. The
+backend it talks to has no database server, no driver, no charting library, and
+no framework.
 
 ```
 $ cat go.mod
@@ -78,31 +80,67 @@ make repro
 Builds twice and prints both hashes.
 
 ```
-SHA-256 (build 1): [XXX]
-SHA-256 (build 2): [XXX]
+SHA-256 (build 1): 0a2d61777f7b8e6c0e5dcadaefc0fa9470a87012545d02829860212ca832a1df
+SHA-256 (build 2): 0a2d61777f7b8e6c0e5dcadaefc0fa9470a87012545d02829860212ca832a1df
 ```
 
 Built with `CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildid="`. The
 binary contains no build timestamp, git SHA, or injected version, which is what
 makes the output byte-identical.
 
+**What that hash is, precisely.** It is commit `bec6b84`, built on
+`linux/amd64` with Go 1.23, by the `reproducible-build` job in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml), which builds twice and
+runs `cmp` on the results. Every push reproduces it.
+
+Reproducibility here means *the same source, toolchain, and target produce the
+same bytes*. It does not mean one universal hash: a different Go version, a
+different GOOS or GOARCH, or a different commit all produce a different and
+equally valid digest. Building this commit on Windows, for instance, gives
+`d5870efac8fe633560ac782e7a6304abcd2ac1dadb012a024d39c3f701106f33`. If you are
+verifying, match your platform and Go version to the ones above, or simply run
+`make repro` and check that your own two builds agree.
+
 ## Beacon size
 
-| | Raw | Gzipped |
-|---|---|---|
-| `vitals` beacon | **942 B** | 571 B |
-| Google `web-vitals` v4 (UMD) | _not yet measured_ | _not yet measured_ |
+Measured with `go run ./tools/compare`, which compresses every file with the
+same gzip implementation. Comparing our file with one compressor and Google's
+with another produces a difference of a few percent that is an artefact of the
+tooling, so all three rows below come from one run.
 
-Our own numbers are measured by `make beacon`, which fails the build if the raw
-beacon exceeds 1024 bytes. The `web-vitals` row is left blank until the actual
-published file is downloaded and measured the same way; quoting a number from
-memory here would be exactly the kind of unverified claim this project is
-supposed to avoid.
+| | Raw | Gzipped | vs ours (raw) | vs ours (gzip) |
+|---|---|---|---|---|
+| **`vitals` beacon** | **942 B** | **571 B** | - | - |
+| `web-vitals` 4.2.4 `iife` | 7,226 B | 2,601 B | 7.7x | 4.6x |
+| `web-vitals` 4.2.4 `attribution.iife` | 12,505 B | 4,172 B | 13.3x | 7.3x |
 
-The beacon exists in two forms: `beacon.src.js` is the readable, commented
-source, and `beacon.min.js` is a hand-minified version. There is no minifier
-here to run, so it was minified by hand. Review the source; the minified file is
-mechanically derived from it.
+`make beacon` enforces the 1024-byte raw budget and fails the build if the
+beacon exceeds it. To reproduce the comparison rows:
+
+```bash
+curl -O https://unpkg.com/web-vitals@4.2.4/dist/web-vitals.iife.js
+go run ./tools/compare web-vitals.iife.js
+```
+
+**This is not quite a like-for-like comparison, and the difference favours us
+unfairly in one respect and unfairly against us in another.**
+
+Against us: `web-vitals` only measures. It hands each metric to a callback and
+leaves transport entirely to you, so a real deployment adds your own reporting
+code on top of the sizes above. Our 942 bytes already include JSON
+serialisation, `sendBeacon`, the `fetch` fallback, and the flush-on-hide logic.
+
+In our favour: `web-vitals` is doing more work per metric. It handles
+back-forward cache restoration, prerendering and `activationStart`, soft
+navigations, and years of accumulated browser quirks, none of which we do. Those
+are not padding; they are the reason for most of the difference. The
+`attribution` build is larger still because it also reports *which element*
+caused a bad LCP or layout shift, which is genuinely useful and which we do not
+attempt at all.
+
+The honest summary: ours is smaller because it does less, and the things it
+does not do are real. It is correct for a normal page load on current Chrome,
+Firefox, and Safari, and that is the whole of the claim.
 
 ## Limits and honest notes
 
@@ -165,7 +203,8 @@ SVG. A database server and driver became an append log and a sorted slice.
 | `make check` | Fail on any dependency violation |
 | `make proof` | Regenerate `deps-proof.txt` |
 | `make repro` | Build twice, print both hashes |
-| `make beacon` | Minify beacon, print size, enforce 1KB budget |
+| `make beacon` | Print beacon size, enforce the 1KB budget |
+| `make compare` | Print beacon size beside another script for comparison |
 
 ## License
 
