@@ -164,6 +164,13 @@ func routes(db *store.Store) (http.Handler, *dash.API, error) {
 	api := dash.NewAPI(db, collector.Counters)
 	api.Register(mux)
 
+	// A recorded measurement notifies every connected dashboard. The collector
+	// knows nothing about the dashboard; it calls a function it was handed.
+	events := api.Events()
+	collector.OnRecord(func(rec store.Record) {
+		events.Publish(dash.Event{Route: rec.Route, At: rec.At})
+	})
+
 	beaconHandler, err := beacon.Handler()
 	if err != nil {
 		return nil, nil, fmt.Errorf("preparing beacon: %w", err)

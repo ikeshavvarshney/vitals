@@ -279,6 +279,35 @@ for.
   measured in kilobytes, saved from a dashboard the developer is running
   locally, does not reach any of them.
 
+- **`socket.io` / `ws` / `sse.js`** → 60 lines of `net/http` writing
+  `text/event-stream`, and the browser's own `EventSource`. Live updates are
+  one-directional and about 90 bytes per page view, so a WebSocket would mean
+  hand-writing a handshake, frame headers, and client-to-server masking for
+  traffic that never flows that way. `socket.io` is better the moment you need
+  rooms, acknowledgements, binary frames, or a fallback for a network that
+  blocks streaming; it also reconnects with backoff, where we rely on
+  `EventSource`'s fixed retry. Ours drops notifications for a subscriber that
+  has fallen 8 behind rather than buffering, which is right for a signal that
+  says "re-read" and wrong for a chat message.
+
+- **`cobra` / `urfave/cli`** → `flag.NewFlagSet` per subcommand and a switch on
+  `os.Args[1]`. Two commands, `serve` and `report`, do not need a command tree,
+  shell completion, or nested help. `cobra` earns its place at ten commands and
+  a plugin system; here it would be 40,000 lines to route one string.
+
+- **`tablewriter` / `lipgloss`** → `fmt.Fprintf` with fixed column widths in
+  `report.go`. The terminal report has one table shape and one alignment rule.
+  `tablewriter` handles what we do not: terminal width detection, wrapping,
+  multi-line cells, and East Asian character widths, where our fixed columns
+  will misalign on a route with wide glyphs.
+
+- **`cron` / `robfig/cron` / an external `logrotate`** → a `time.Ticker` on an
+  hour and a directory walk that removes whole day files. Retention here is one
+  rule, day-granular, so a cron expression parser would be the only thing in the
+  binary that needed one. `logrotate` is better at everything about rotation
+  that we do not do: compression, copy-truncate for open files, size triggers,
+  and post-rotate hooks.
+
 ## Demo site
 
 - **A templating engine (`handlebars`, `ejs`, `html/template`)** → a small

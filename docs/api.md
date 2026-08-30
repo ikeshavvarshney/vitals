@@ -16,6 +16,7 @@ pagination.
 | `GET` | `/api/routes` | One metric broken down by route |
 | `GET` | `/api/devices` | One metric broken down by device class |
 | `GET` | `/api/report` | Every metric at once, with quantiles, band counts, and breakdowns |
+| `GET` | `/api/events` | Server-Sent Events: one notification per recorded measurement |
 | `GET` | `/b.js` | The minified beacon |
 | `GET` | `/beacon.src.js` | The readable beacon source |
 | `GET` | `/demo/` | The bundled demo site |
@@ -33,6 +34,7 @@ flowchart LR
         routes["GET /api/routes"]
         devices["GET /api/devices"]
         report["GET /api/report"]
+        events["GET /api/events"]
     end
     subgraph assets["Static"]
         bjs["GET /b.js"]
@@ -48,6 +50,7 @@ flowchart LR
     store --> routes
     store --> devices
     store --> report
+    collect --> events
 ```
 
 ## 2. Collection
@@ -179,7 +182,11 @@ Thresholds ship with each entry so the dashboard need not duplicate the
 constants. `unit` is `"ms"` for durations and `""` for CLS, which is unitless.
 
 `coverage` describes the whole store rather than the window, so a caller can
-distinguish an empty window from an empty database. `beaconBytes` is included so
+distinguish an empty window from an empty database. It also reports the disk
+footprint: `bytes` and `files` are measured by reading the day logs, not
+estimated, `bytesPerRecord` is their average cost including the JSON keys, and
+`retentionDays` is the `-retain` window the server was started with, `0` when
+nothing is dropped. `beaconBytes` is included so
 the dashboard can report the beacon's size without spending a request on it.
 
 ## 5. `GET /api/series`
@@ -298,7 +305,41 @@ Notes on the fields that are not in the other endpoints:
 - `caveats` restates the dashboard's footnotes inside the payload, so a report
   that travels somewhere else takes its disclosures with it.
 
-## 8. Accuracy
+## 8. `GET /api/events`
+
+A Server-Sent Events stream. One frame per recorded measurement:
+
+```
+: connected
+
+event: sample
+data: {"route":"/pricing","at":"2026-08-30T12:00:04.117Z"}
+
+: keep-alive
+```
+
+The dashboard subscribes with `EventSource` and reloads its data when a frame
+arrives, coalescing bursts into one reload every 1.5 seconds. An idle instance
+costs one open connection and a comment line every 25 seconds; there is no
+polling.
+
+The frame carries the route and the timestamp and nothing else. Sending the
+figures would mean a second code path computing them, which is a second thing
+to keep correct, and the client already knows how to read the API. The route is
+JSON-quoted, so a path containing a quote or a newline cannot forge a frame.
+
+SSE rather than WebSocket: the traffic is one-directional and tiny, it is a text
+format over an ordinary response that `net/http` already serves, and the browser
+reconnects on its own. A WebSocket would mean hand-writing a handshake, framing,
+and masking for a feature that sends one line per page view.
+
+A subscriber that stops reading is never waited on. Its queue holds 8
+notifications and then drops them: a notification carries nothing the client
+cannot re-read, so a slow client should skip to the present rather than replay a
+backlog. This matters because publishing happens on the goroutine answering the
+beacon, and a stalled browser tab must not stall collection.
+
+## 9. Accuracy
 
 Every `value` in this API is an approximation read off histogram buckets, not an
 exact order statistic. For millisecond metrics the error is bounded at **4.9%

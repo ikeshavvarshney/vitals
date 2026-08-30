@@ -40,12 +40,21 @@ type Counters struct {
 type Handler struct {
 	store Appender
 	now   func() time.Time // replaceable in tests
+	// onRecord, when set, is called after a measurement is stored. It is how
+	// the dashboard learns that something arrived without polling for it.
+	// Handlers run on the request goroutine, so an implementation must not
+	// block: the collector's answer to the beacon waits on it.
+	onRecord func(store.Record)
 
 	accepted    atomic.Uint64
 	malformed   atomic.Uint64
 	tooLarge    atomic.Uint64
 	storeErrors atomic.Uint64
 }
+
+// OnRecord registers a function called after each accepted measurement is
+// stored. It replaces any previous one and must be set before serving.
+func (h *Handler) OnRecord(fn func(store.Record)) { h.onRecord = fn }
 
 // NewHandler returns a Handler that appends accepted payloads to s.
 func NewHandler(s Appender) *Handler {
@@ -123,6 +132,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.accepted.Add(1)
 	w.WriteHeader(http.StatusNoContent)
+
+	if h.onRecord != nil {
+		h.onRecord(rec)
+	}
 }
 
 // SessionID derives a coarse visitor identifier from the request's origin and

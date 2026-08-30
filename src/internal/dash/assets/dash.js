@@ -27,6 +27,7 @@
     filterRoute: document.getElementById('filter-route'),
     filterClear: document.getElementById('filter-clear'),
     refresh: document.getElementById('refresh'),
+    live: document.getElementById('live'),
     snapLink: document.getElementById('snap-link'),
     copyJSON: document.getElementById('copy-json'),
     downloadJSON: document.getElementById('download-json'),
@@ -897,6 +898,52 @@
     return lines.join('\n');
   }
 
+  // ------------------------------------------------------------------ live
+
+  // The dashboard subscribes to a Server-Sent Events stream and reloads when a
+  // measurement arrives. It does not poll: an idle instance costs one open
+  // connection and a keep-alive comment every 25 seconds.
+  //
+  // Reloads are coalesced. A burst of page views would otherwise fire a burst
+  // of four API requests each, and the figures cannot meaningfully change
+  // faster than a person can read them.
+  var LIVE_QUIET_MS = 1500;
+
+  var live = { source: null, pending: null, since: 0, seen: 0 };
+
+  function liveState(state, detail) {
+    if (!el.live) return;
+    el.live.setAttribute('data-state', state);
+    el.live.textContent = detail;
+  }
+
+  function startLive() {
+    if (!window.EventSource || live.source) return;
+
+    var source = new EventSource('/api/events');
+    live.source = source;
+
+    source.addEventListener('open', function () {
+      liveState('on', 'Live');
+    });
+
+    source.addEventListener('sample', function () {
+      live.seen++;
+      liveState('on', live.seen === 1 ? '1 arrived' : live.seen + ' arrived');
+
+      if (live.pending) clearTimeout(live.pending);
+      live.pending = setTimeout(function () {
+        live.pending = null;
+        load();
+      }, LIVE_QUIET_MS);
+    });
+
+    source.addEventListener('error', function () {
+      // EventSource reconnects on its own; say so rather than implying loss.
+      liveState('off', 'Reconnecting');
+    });
+  }
+
   // ------------------------------------------------------------------ load
 
   function load() {
@@ -946,6 +993,7 @@
 
   buildMetricSelector();
   buildPercentileSelector();
+  startLive();
   renderFilter();
   renderLedger();
   renderBookmarklet();

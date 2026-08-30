@@ -25,7 +25,13 @@ type API struct {
 	// retention is how long day logs are kept, reported so the dashboard can
 	// say why old measurements are gone. Zero means nothing is dropped.
 	retention time.Duration
+	// events notifies connected dashboards that a measurement arrived.
+	events *Events
 }
+
+// Events returns the broadcaster the live stream reads from. The collector
+// publishes to it, which is what makes the dashboard update without polling.
+func (a *API) Events() *Events { return a.events }
 
 // SetRetention records the retention window the server was started with, for
 // reporting only. The API never deletes anything.
@@ -40,6 +46,7 @@ func NewAPI(s *store.Store, counters func() ingest.Counters) *API {
 		store:    s,
 		counters: counters,
 		now:      func() time.Time { return time.Now().UTC() },
+		events:   NewEvents(),
 	}
 }
 
@@ -50,6 +57,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/routes", a.handleRoutes)
 	mux.HandleFunc("GET /api/devices", a.handleDevices)
 	mux.HandleFunc("GET /api/report", a.handleReport)
+	mux.HandleFunc("GET /api/events", a.handleEvents)
 }
 
 // metricSummary is one metric's headline figure.

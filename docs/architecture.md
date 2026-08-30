@@ -57,7 +57,7 @@ one command with no configuration file and no external services.
 | `src/internal/ingest` | Payload parsing, validation, session derivation, counters |
 | `src/internal/store` | Append log, replay, in-memory index, range queries |
 | `src/internal/stats` | Histograms, approximate percentiles, banding |
-| `src/internal/dash` | JSON API handlers and dashboard assets |
+| `src/internal/dash` | JSON API handlers, the live event stream, and dashboard assets |
 | `src/internal/demo` | Bundled demo site |
 | `src/tools/` | Build-time utilities: dependency check, hashing, size reporting |
 | `tests/` | Black-box tests over the served HTTP surface; see `tests/README.md` |

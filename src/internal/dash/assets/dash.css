@@ -721,3 +721,25 @@ td.meter { width: 32%; min-width: 5rem; }
   background: var(--panel);
 }
 .snap-link.is-pending:hover { border-color: var(--line); }
+
+/* Live stream indicator ---------------------------------------------------- */
+
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.live::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line);
+}
+.live[data-state="on"] { color: var(--good); }
+.live[data-state="on"]::before { background: var(--good); }
+.live[data-state="off"]::before { background: var(--ink-3); }
