@@ -102,3 +102,37 @@ for.
   startup. The log is replayed once when the process starts and written only by
   this process, so nothing needs to watch the filesystem for changes. A watcher
   would be required if a second writer existed, and by design one does not.
+
+## Ingest
+
+- **`body-parser` / `express.json` / `encoding/json` for the hot path** → a
+  hand-written scanner in `internal/ingest/parse.go`. This is the only place
+  the program reads untrusted input, so the failure modes are worth owning: it
+  accepts exactly one object shape, enforces its own size, route-length, and
+  key-count limits, rejects before allocating, and cannot be pushed into
+  unbounded work by a hostile body. `encoding/json` is better in every other
+  respect: it handles arbitrary shapes, its number and string handling has been
+  fuzzed by far more people than ours, and it supports streaming decode. Ours
+  is fuzz-tested here (`FuzzParse`) precisely because that gap is real.
+
+- **`uuid` / `nanoid` / `cuid` for visitor identifiers** → `crypto/sha256` over
+  the address, user agent, and UTC date, truncated to 8 hex characters. A
+  generated identifier would need to be stored somewhere to be stable, and
+  storing it is what a cookie is. Deriving it means there is nothing to store,
+  nothing to sync, and no identifier that outlives the day. A real ID library
+  gives collision-resistant globally unique values; ours collides deliberately,
+  because collapsing similar visitors is the privacy property we want.
+
+- **`cors`** → nothing at all. `navigator.sendBeacon` posts `text/plain`, which
+  is a CORS-simple request: the browser sends it cross-origin with no preflight
+  and never needs to read the response. Adding CORS headers would be cargo
+  cult. The `cors` package is genuinely necessary the moment an endpoint must
+  return a readable response cross-origin, which this one deliberately does not.
+
+- **`express-rate-limit` / `helmet`** → not used, and this is a stated gap
+  rather than a substitution. The collection endpoint has no rate limiting: a
+  determined client can post as fast as the network allows and inflate the
+  numbers. The body cap, the metric plausibility bounds, and the 204-always
+  response limit the damage, but they are not a rate limiter. For a
+  self-hosted tool on a small site this is an accepted risk, not a solved
+  problem.
