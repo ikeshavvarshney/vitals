@@ -116,15 +116,28 @@ func TestParseQuery(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:   "relative from",
+			name:   "relative from closes the open end at now",
 			values: url.Values{"from": {"6h"}},
 			check: func(t *testing.T, q query) {
 				if want := refNow.Add(-6 * time.Hour); !q.Range.From.Equal(want) {
 					t.Errorf("From = %v, want %v", q.Range.From, want)
 				}
-				// Only from was given, so to stays open rather than defaulting.
-				if !q.Range.To.IsZero() {
-					t.Errorf("To = %v, want the zero time", q.Range.To)
+				// An open end must not survive into a bucketed query: see
+				// TestRangeIsAlwaysBoundedAndSane.
+				if !q.Range.To.Equal(refNow) {
+					t.Errorf("To = %v, want %v", q.Range.To, refNow)
+				}
+			},
+		},
+		{
+			name:   "only to given closes the other end",
+			values: url.Values{"to": {refNow.Format(time.RFC3339)}},
+			check: func(t *testing.T, q query) {
+				if !q.Range.To.Equal(refNow) {
+					t.Errorf("To = %v, want %v", q.Range.To, refNow)
+				}
+				if want := refNow.Add(-defaultWindow); !q.Range.From.Equal(want) {
+					t.Errorf("From = %v, want %v", q.Range.From, want)
 				}
 			},
 		},
@@ -170,5 +183,46 @@ func TestParseQuery(t *testing.T) {
 				tt.check(t, q)
 			}
 		})
+	}
+}
+
+// TestRangeIsAlwaysBoundedAndSane is a regression test.
+//
+// The dashboard sends only "from". When "to" was left open it reached
+// store.Range.Normalize, which substitutes the year 9999; subtracting from that
+// saturates time.Duration at roughly 292 years, and a "last 24 hours" chart was
+// silently bucketed into six-year intervals. Found by driving the real dashboard
+// in Chrome, not by any unit test, because every test here passed both ends.
+func TestRangeIsAlwaysBoundedAndSane(t *testing.T) {
+	cases := []url.Values{
+		{},
+		{"from": {"24h"}},
+		{"from": {"1h"}},
+		{"to": {refNow.Format(time.RFC3339)}},
+		{"metric": {"lcp"}},
+	}
+
+	for _, v := range cases {
+		q, err := parseQuery(v, refNow)
+		if err != nil {
+			t.Fatalf("parseQuery(%v): %v", v, err)
+		}
+		if q.Range.From.IsZero() || q.Range.To.IsZero() {
+			t.Errorf("parseQuery(%v) left an end open: %v to %v", v, q.Range.From, q.Range.To)
+			continue
+		}
+
+		span := q.Range.To.Sub(q.Range.From)
+		if span <= 0 {
+			t.Errorf("parseQuery(%v) span = %v, want positive", v, span)
+		}
+		// Anything approaching the int64 nanosecond ceiling means an open end
+		// leaked through and the duration saturated.
+		if span > 365*24*time.Hour*100 {
+			t.Errorf("parseQuery(%v) span = %v, which is implausible and suggests overflow", v, span)
+		}
+		if bucket := span / time.Duration(q.Buckets); bucket > 90*24*time.Hour {
+			t.Errorf("parseQuery(%v) bucket width = %v, far too coarse", v, bucket)
+		}
 	}
 }

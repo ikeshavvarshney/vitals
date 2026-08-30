@@ -349,16 +349,17 @@
     document.getElementById('ledger-page').textContent = pageText;
     document.getElementById('ledger-requests').textContent = String(entries.length + 1);
 
-    // The dashboard does not load the beacon, so ask for its advertised size.
+    // The dashboard does not load the beacon itself. Its size arrives in the
+    // summary payload rather than costing a request of its own.
     if (beacon > 0) {
       document.getElementById('ledger-beacon').textContent = formatBytes(beacon);
-    } else {
-      fetch('/b.js', { method: 'HEAD' }).then(function (r) {
-        var bytes = r.headers.get('x-beacon-bytes');
-        document.getElementById('ledger-beacon').textContent =
-          bytes ? formatBytes(parseInt(bytes, 10)) : '—';
-      }).catch(function () {});
     }
+  }
+
+  function renderBeaconSize(bytes) {
+    if (!bytes) return;
+    var el = document.getElementById('ledger-beacon');
+    if (el.textContent === '—') el.textContent = formatBytes(bytes);
   }
 
   // ------------------------------------------------------------------ load
@@ -378,6 +379,7 @@
     ]).then(function (r) {
       renderScorecard(r[0]);
       renderCounters(r[0]);
+      renderBeaconSize(r[0].beaconBytes);
       renderSeries(r[1]);
       renderTable(el.routes, r[2], 'Route');
       renderTable(el.devices, r[3], 'Device');

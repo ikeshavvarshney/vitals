@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"vitals/internal/beacon"
 	"vitals/internal/ingest"
 	"vitals/internal/stats"
 	"vitals/internal/store"
@@ -64,6 +65,10 @@ type summaryResponse struct {
 	Metrics  []metricSummary  `json:"metrics"`
 	Ingest   ingest.Counters  `json:"ingest"`
 	Coverage *coverageSummary `json:"coverage"`
+	// BeaconBytes lets the dashboard show the beacon's size without issuing a
+	// request for it. A tool arguing about page weight should not add a round
+	// trip to report its own.
+	BeaconBytes int `json:"beaconBytes"`
 }
 
 // coverageSummary reports what the store holds overall, so the dashboard can
@@ -108,6 +113,7 @@ func (a *API) handleSummary(w http.ResponseWriter, r *http.Request) {
 		resp.Metrics = append(resp.Metrics, summarize(m, hists[m]))
 	}
 	resp.Coverage = a.coverage()
+	resp.BeaconBytes = beacon.Size()
 
 	writeJSON(w, resp)
 }

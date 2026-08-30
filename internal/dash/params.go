@@ -44,10 +44,19 @@ func parseQuery(v url.Values, now time.Time) (query, error) {
 		return query{}, fmt.Errorf("to: %w", err)
 	}
 
-	// Neither end given: show the most recent window, not all of history.
-	if from.IsZero() && to.IsZero() {
+	// Both ends are always resolved to concrete times.
+	//
+	// Leaving an end open here used to reach store.Range.Normalize, which
+	// substitutes the year 9999. Subtracting from that saturates time.Duration,
+	// which is an int64 of nanoseconds and tops out around 292 years, so a
+	// series over "the last 24 hours" was silently bucketed into six-year
+	// intervals. An unbounded range is meaningful to the store; it is not
+	// meaningful to a chart with a fixed number of buckets.
+	if to.IsZero() {
 		to = now
-		from = now.Add(-defaultWindow)
+	}
+	if from.IsZero() {
+		from = to.Add(-defaultWindow)
 	}
 	q.Range = store.Range{From: from, To: to}
 

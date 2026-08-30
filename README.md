@@ -191,6 +191,14 @@ site.
 behave differently on insecure origins. `localhost` counts as secure, so the
 demo works; deploying to a plain-HTTP origin will lose metrics.
 
+**Verified in a real browser.** The beacon has been driven end to end in
+Chrome 152 over the DevTools Protocol: all four demo pages loaded with no
+console errors, uncaught exceptions, or failed requests; all five metrics were
+collected and ingested; and the dashboard rendered the scorecard, chart, and
+tables from that data. INP was measured at 600.0ms against a handler
+deliberately blocking for 600ms. Firefox and Safari have **not** been tested,
+so support there is claimed on standards compliance rather than on evidence.
+
 ## What was replaced
 
 See [`STDLIB.md`](STDLIB.md) for the full list: every package that would
