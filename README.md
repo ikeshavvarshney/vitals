@@ -60,6 +60,17 @@ hidden. It sets no cookie and no persistent identifier.
 - Time series and per-route breakdown
 - One binary, one data directory, no external services
 
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | How the pieces fit together, request flow, design decisions, limits |
+| [`docs/beacon.md`](docs/beacon.md) | What the client script measures, how accurate each metric is, what it does not handle |
+| [`docs/api.md`](docs/api.md) | Every endpoint, parameter, and response shape |
+| [`docs/storage.md`](docs/storage.md) | On-disk format, durability, percentile arithmetic and error bounds |
+| [`docs/development.md`](docs/development.md) | Building, testing, CI, the dependency rules |
+| [`STDLIB.md`](STDLIB.md) | Every package replaced, and where the original is better |
+
 ## Verifying zero dependencies
 
 ```bash
@@ -155,7 +166,8 @@ Firefox, and Safari, and that is the whole of the claim.
 
 This section is the point of the project, so it is specific.
 
-**INP is approximated.** True INP requires tracking full interaction latency
+**INP is approximated.** See [`docs/beacon.md`](docs/beacon.md#4-what-is-collected-and-how-accurate-it-is).
+True INP requires tracking full interaction latency
 across all event entries and reporting a high percentile of them. This
 implementation reports the **maximum duration of any single event** longer than
 16ms, observed through `PerformanceObserver` with `durationThreshold: 16`. On a
@@ -165,7 +177,7 @@ pessimistic and wrong in the tail. It is labelled INP on the dashboard because
 that is the metric it approximates, and this paragraph is the correction.
 Google's `web-vitals` does this properly.
 
-**Percentiles are bucketed, not exact.** Values go into log-spaced histogram
+**Percentiles are bucketed, not exact.** Full arithmetic in [`docs/storage.md`](docs/storage.md#3-percentiles). Values go into log-spaced histogram
 buckets and p75 is read off cumulative counts. For the millisecond metrics the
 buckets grow 10% at a time and the reported value is the geometric mean of its
 bucket, which bounds the error at **4.9% relative**. CLS uses linear buckets of
