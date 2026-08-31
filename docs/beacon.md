@@ -252,6 +252,28 @@ The default beacon at `/b.js` does not handle any of the following.
 
 Most of the size difference against `web-vitals` is these features, not padding.
 
+### One `web-vitals` feature deliberately not implemented
+
+`web-vitals` offers `reportAllChanges`, which calls back on every revision of a
+metric rather than once at the end, along with a `delta` field carrying the
+change since the previous callback. Neither beacon here has an equivalent, and
+that is a decision rather than an omission.
+
+The callback in `web-vitals` is local: reporting every change costs a function
+call. Here the equivalent is a network request, so a page whose LCP is revised
+eight times would post eight payloads and store eight records for one page view.
+That would multiply the request volume this tool exists to keep small, and it
+would break the store's assumption that one record is one page view, on which
+the page-view count, the device breakdown, and every band tally depend.
+
+`delta` follows from the same choice. With one report per page view the delta
+of a metric is always the metric, so the field would carry no information.
+
+What this costs: a page view that is abandoned before the page is hidden reports
+nothing, where `reportAllChanges` would have reported the value so far. The
+payload is sent on `visibilitychange` and on `pagehide`, which between them cover
+every normal way a page ends, so the gap is a browser crash or a killed tab.
+
 ## 8. The bookmarklet, for pages you do not control
 
 The beacon is installed by a site owner. For a site that is not yours, the
