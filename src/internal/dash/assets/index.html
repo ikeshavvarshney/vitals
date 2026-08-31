@@ -36,6 +36,20 @@
 </header>
 
 <main id="main">
+  <div class="filter" id="filter" hidden>
+    <span class="filter-label">Filtered to route</span>
+    <code class="filter-route" id="filter-route"></code>
+    <button type="button" id="filter-clear">Clear filter</button>
+  </div>
+
+  <section aria-labelledby="scorecard-heading">
+    <div class="section-head">
+      <h2 id="scorecard-heading">Scorecard</h2>
+      <p class="section-note" id="scorecard-sub">75th percentile across the selected window</p>
+    </div>
+    <div class="scorecard" id="scorecard"></div>
+  </section>
+
   <div class="toolbar">
     <div class="field">
       <label for="window">Time window</label>
@@ -64,20 +78,6 @@
       <button type="button" id="refresh">Refresh</button>
     </div>
   </div>
-
-  <div class="filter" id="filter" hidden>
-    <span class="filter-label">Filtered to route</span>
-    <code class="filter-route" id="filter-route"></code>
-    <button type="button" id="filter-clear">Clear filter</button>
-  </div>
-
-  <section aria-labelledby="scorecard-heading">
-    <div class="section-head">
-      <h2 id="scorecard-heading">Scorecard</h2>
-      <p class="section-note" id="scorecard-sub">75th percentile across the selected window</p>
-    </div>
-    <div class="scorecard" id="scorecard"></div>
-  </section>
 
   <section aria-labelledby="series-heading">
     <div class="section-head">
