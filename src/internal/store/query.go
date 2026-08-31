@@ -120,3 +120,112 @@ func (s *Store) boundsLocked(rng Range) (lo, hi int) {
 	}
 	return lo, hi
 }
+
+// Sessions returns the visitor identifiers seen in the range, most recently
+// active first, capped at limit. A limit of zero or less returns nothing.
+//
+// The identifier is the coarse, daily-rotating value the collector derives; it
+// is not linkable across days and is not a cookie. See
+// [vitals/src/internal/ingest.SessionID].
+func (s *Store) Sessions(rng Range, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	lo, hi := s.boundsLocked(rng)
+
+	// last holds each session's newest index inside the window, which is what
+	// "most recently active" orders on.
+	type activity struct {
+		session string
+		last    int
+	}
+	seen := make([]activity, 0, len(s.bySession))
+
+	for session, idx := range s.bySession {
+		// Indices ascend, so the newest in range is found from the back.
+		for k := len(idx) - 1; k >= 0; k-- {
+			i := idx[k]
+			if i >= hi {
+				continue
+			}
+			if i < lo {
+				break // nothing earlier in this list qualifies either
+			}
+			seen = append(seen, activity{session: session, last: i})
+			break
+		}
+	}
+
+	sort.Slice(seen, func(i, j int) bool {
+		if seen[i].last != seen[j].last {
+			return seen[i].last > seen[j].last
+		}
+		return seen[i].session < seen[j].session
+	})
+
+	if len(seen) > limit {
+		seen = seen[:limit]
+	}
+
+	out := make([]string, 0, len(seen))
+	for _, a := range seen {
+		out = append(out, a.session)
+	}
+	return out
+}
+
+// EachSession calls fn for every record belonging to one visitor within the
+// range, in ascending time order, stopping early if fn returns false. It uses
+// the session index, so the other records are never scanned.
+//
+// The read lock is held throughout, so fn must not call back into the Store and
+// should not block.
+func (s *Store) EachSession(session string, rng Range, fn func(Record) bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	idx, ok := s.bySession[session]
+	if !ok {
+		return
+	}
+	lo, hi := s.boundsLocked(rng)
+	for _, i := range idx {
+		if i < lo {
+			continue
+		}
+		if i >= hi {
+			return // indices ascend, so nothing later qualifies
+		}
+		if !fn(s.records[i]) {
+			return
+		}
+	}
+}
+
+// SessionCount returns how many distinct visitors were seen in the range.
+func (s *Store) SessionCount(rng Range) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	lo, hi := s.boundsLocked(rng)
+
+	n := 0
+	for _, idx := range s.bySession {
+		for k := len(idx) - 1; k >= 0; k-- {
+			i := idx[k]
+			if i >= hi {
+				continue
+			}
+			if i < lo {
+				break
+			}
+			n++
+			break
+		}
+	}
+	return n
+}

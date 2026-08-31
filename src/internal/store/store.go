@@ -35,10 +35,11 @@ var ErrClosed = errors.New("store: closed")
 type Store struct {
 	dir string
 
-	mu      sync.RWMutex
-	records []Record         // sorted by At, ascending
-	byRoute map[string][]int // route to indices into records
-	closed  bool
+	mu        sync.RWMutex
+	records   []Record         // sorted by At, ascending
+	byRoute   map[string][]int // route to ascending indices into records
+	bySession map[string][]int // session to ascending indices into records
+	closed    bool
 
 	// Write side.
 	file     *os.File
@@ -61,10 +62,11 @@ func Open(dir string) (s *Store, skipped int, err error) {
 	}
 
 	st := &Store{
-		dir:     dir,
-		byRoute: make(map[string][]int),
-		stop:    make(chan struct{}),
-		done:    make(chan struct{}),
+		dir:       dir,
+		byRoute:   make(map[string][]int),
+		bySession: make(map[string][]int),
+		stop:      make(chan struct{}),
+		done:      make(chan struct{}),
 	}
 
 	skipped, err = st.replay()
@@ -144,11 +146,21 @@ func (s *Store) replayFile(path string) (skipped int, err error) {
 	return skipped, nil
 }
 
-// reindex rebuilds the route index. The caller must hold the write lock.
+// reindex rebuilds both secondary indexes from scratch. The caller must hold
+// the write lock.
+//
+// This runs on replay and after a prune, where the whole record slice has been
+// rebuilt anyway. It is deliberately not on the append path: see
+// [Store.insertLocked].
 func (s *Store) reindex() {
 	s.byRoute = make(map[string][]int, len(s.byRoute))
+	s.bySession = make(map[string][]int, len(s.bySession))
+
 	for i, r := range s.records {
 		s.byRoute[r.Route] = append(s.byRoute[r.Route], i)
+		if r.Session != "" {
+			s.bySession[r.Session] = append(s.bySession[r.Session], i)
+		}
 	}
 }
 
@@ -195,16 +207,73 @@ func (s *Store) insertLocked(r Record) {
 
 	if i == len(s.records) {
 		s.records = append(s.records, r)
-		s.byRoute[r.Route] = append(s.byRoute[r.Route], i)
+		s.indexLocked(r, i)
 		return
 	}
 
 	s.records = append(s.records, Record{})
 	copy(s.records[i+1:], s.records[i:])
 	s.records[i] = r
-	// Every index at or after i shifted, so the route index must be rebuilt.
-	// Out-of-order arrivals are rare enough that this is not a hot path.
-	s.reindex()
+
+	// Everything at or after i moved up by one, so the indexes have to follow.
+	//
+	// This used to rebuild both maps from scratch, which is O(records) for one
+	// late arrival. Late arrivals are not rare: the collector stamps a record
+	// with the wall clock and then takes this lock separately, so two
+	// concurrent page views regularly land in the opposite order to their
+	// timestamps. Under load that made every insert O(records) and the whole
+	// append path quadratic.
+	//
+	// Shifting instead costs one pass over the indexes, and each list is
+	// scanned from its tail and abandoned as soon as it drops below i, so a
+	// record that arrives a few microseconds late touches a handful of entries
+	// rather than all of them.
+	s.shiftIndexLocked(s.byRoute, i)
+	s.shiftIndexLocked(s.bySession, i)
+	s.indexLocked(r, i)
+}
+
+// indexLocked adds the record at position i to both secondary indexes, keeping
+// each list ascending. The caller must hold the write lock.
+func (s *Store) indexLocked(r Record, i int) {
+	addIndex(s.byRoute, r.Route, i)
+	if r.Session != "" {
+		addIndex(s.bySession, r.Session, i)
+	}
+}
+
+// addIndex inserts i into the ascending list stored under key.
+func addIndex(index map[string][]int, key string, i int) {
+	list := index[key]
+
+	// The overwhelming majority of appends land at the end, so check that
+	// before paying for a search.
+	if len(list) == 0 || list[len(list)-1] < i {
+		index[key] = append(list, i)
+		return
+	}
+
+	at := sort.SearchInts(list, i)
+	list = append(list, 0)
+	copy(list[at+1:], list[at:])
+	list[at] = i
+	index[key] = list
+}
+
+// shiftIndexLocked increments every stored index at or after from, because the
+// records they point at have moved up by one. The caller must hold the write
+// lock.
+func (s *Store) shiftIndexLocked(index map[string][]int, from int) {
+	for _, list := range index {
+		// Lists ascend, so scanning backwards stops at the first index below
+		// from rather than walking the whole list.
+		for k := len(list) - 1; k >= 0; k-- {
+			if list[k] < from {
+				break
+			}
+			list[k]++
+		}
+	}
 }
 
 // ensureFileLocked opens or rotates the log file so that it matches the UTC day
