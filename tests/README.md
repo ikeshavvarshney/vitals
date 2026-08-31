@@ -10,6 +10,8 @@ it with a browser sees the same behaviour.
 | `endtoend_test.go` | A beacon payload posted the way a browser posts it, read back through the API. Every route reachable, the demo pages instrumented, an unknown path 404, malformed payloads accepted without storing, a measurement surviving a restart, the served beacon inside its byte budget. |
 | `api_contract_test.go` | The JSON shapes consumers depend on: `value` rather than `p75`, null for an unreported metric, the comparison window, the percentile and route filter parameters, the report's caveats, and a `400` with a named parameter for anything unparseable. |
 | `assets_test.go` | The premise, checked against what is served rather than the source tree: no absolute URL, no web font, no CDN. Plus the caching policy, gzip, and that a conditional request answers `304` with an empty body. |
+| `live_test.go` | The Server-Sent Events stream: headers, the opening comment, a frame naming the route that was just recorded, and that ingestion keeps working after a stream client disconnects. |
+| `storage_test.go` | Disk usage reported from the files, and `-retain` removing an old day log from disk, from memory, and from the API while today's is untouched. |
 
 ## Where the rest of the tests are
 
@@ -24,10 +26,11 @@ of the risk. Moving them here would mean exporting `parseQuery`, `summarize`,
 | `src/internal/stats` | Histogram bucketing, quantile arithmetic, the stated error bounds, banding against the published thresholds. |
 | `src/internal/store` | Record encoding and decoding, replay of a truncated file, range queries, the route index, flush behaviour. |
 | `src/internal/ingest` | The hand-written JSON parser, size limits, malformed input, the derived session identifier. |
-| `src/internal/dash` | Query parameter parsing, the summary, series, breakdown and report handlers, and the asset invariants. |
+| `src/internal/dash` | Query parameter parsing, the summary, series, breakdown and report handlers, event broadcasting and frame quoting, and the asset invariants. |
 | `src/internal/httpx` | The file server: ETags, conditional requests, gzip negotiation, cache policy, method handling. |
 | `src/internal/beacon` | The beacon's byte budget and that the minified form is the source's behaviour. |
 | `src/tools/check` | The dependency checker itself, which is what enforces the zero-dependency rule. |
+| `src/cmd/vitals` | The `report` subcommand: table output, `-json`, flag validation, and that a server flag is never mistaken for a subcommand. |
 
 ## Running
 

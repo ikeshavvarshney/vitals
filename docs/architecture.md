@@ -26,7 +26,7 @@ flowchart LR
         ingest["src/internal/ingest<br/>parse, validate, derive session"]
         store["src/internal/store<br/>append log + in-memory index"]
         stats["src/internal/stats<br/>histograms, percentiles, banding"]
-        api["src/internal/dash<br/>JSON API"]
+        api["src/internal/dash<br/>JSON API + event stream"]
     end
 
     disk[("data/YYYY-MM-DD.jsonl")]
@@ -38,6 +38,8 @@ flowchart LR
     api --> store
     api --> stats
     dash -- "GET /api/*" --> api
+    ingest -- "notify" --> api
+    api -- "GET /api/events (SSE)" --> dash
     httpx -- "serves" --> beacon
     httpx -- "serves" --> dash
 ```
@@ -106,6 +108,41 @@ Assets under `src/internal/beacon`, `src/internal/dash/assets`, and
 `src/internal/demo/site` are embedded with `//go:embed`, making the binary
 standalone. They reside inside the packages that embed them because `//go:embed`
 cannot reference paths outside its own package directory.
+
+## 2a. Live updates
+
+A recorded measurement notifies every connected dashboard, which then re-reads
+the API. The collector knows nothing about the dashboard: it calls a function it
+was handed at wiring time in `src/server`.
+
+```mermaid
+sequenceDiagram
+    participant B as Beacon
+    participant I as ingest.Handler
+    participant S as store.Store
+    participant E as dash.Events
+    participant D as Dashboard
+
+    B->>I: POST /v1/collect
+    I->>S: Append
+    I-->>B: 204
+    I->>E: Publish{route, at}
+    E-->>D: event: sample
+    D->>D: coalesce 1.5s
+    D->>S: GET /api/summary, series, routes, devices
+```
+
+Three properties this design holds to:
+
+- **Publishing never blocks.** It runs on the goroutine answering the beacon. A
+  subscriber that has fallen 8 notifications behind starts dropping them, which
+  is correct for a signal meaning "re-read" and would be wrong for a message
+  carrying data.
+- **The frame carries no figures.** Route and timestamp only. Sending numbers
+  would mean a second path computing them, and therefore a second path to keep
+  correct.
+- **Reloads are coalesced.** A burst of page views produces one reload per 1.5
+  seconds, not one per view.
 
 ## 3. Collection path
 
@@ -222,6 +259,11 @@ Reads hold the read lock for the duration of iteration, so a callback passed to
 
 Ingest counters use `atomic.Uint64`.
 
+The event broadcaster has its own mutex, held only while walking the subscriber
+set. Sends are non-blocking, so a stalled dashboard cannot delay the collector
+that is publishing to it. A subscriber's cancel function is idempotent and is
+the only place its channel is closed.
+
 The suite runs under the race detector in CI on every push. It has not been run
 under the race detector on Windows, where the detector requires a C toolchain.
 
@@ -233,9 +275,10 @@ The following are properties of the architecture rather than defects.
 |---|---|
 | Entire record set held in memory | Memory grows with total records; capacity is bounded by one machine |
 | Single writer, no locking | Two processes sharing a data directory will corrupt the log |
-| No retention policy | `data/` grows until pruned manually |
+| Retention is day-granular | `-retain` drops whole day logs; a record is never deleted on its own, and without the flag `data/` grows forever |
 | No authentication | Dashboard and API are open to anyone who can reach the port |
 | No rate limiting on collection | A client can inflate the numbers |
+| One event stream per dashboard | Connections scale with open tabs, not with traffic; each costs a goroutine and a keep-alive every 25s |
 | Route is the only secondary index | Device and session queries scan the range |
 
 At the intended scale, a single site producing thousands of page views per day,

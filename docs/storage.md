@@ -100,6 +100,33 @@ Unknown metric keys and non-finite values are dropped during replay rather than
 rejecting the record, so a log written by a newer version still replays in an
 older one.
 
+## 2a. Retention and disk usage
+
+`Store.Usage` reports what the day logs occupy, read from the files rather than
+counted as bytes are written, so the figure stays true after a restart, after a
+manual deletion, and after pruning. It flushes the write buffer first: without
+that a store holding records could report zero bytes, which reads as a bug
+rather than as buffering.
+
+It also reports the average on-disk cost of one record, which includes the JSON
+keys and not only the values. On a representative sample that is about 150 bytes
+per page view, so a site serving ten thousand views a day writes roughly 1.5MB a
+day.
+
+`Store.Prune` deletes whole day logs older than a cutoff and drops their records
+from memory. Two rules:
+
+- **A file is never rewritten.** Expiry is day-granular because a partially
+  rewritten append log is a corrupt append log, and the recovery story for that
+  is worse than keeping a day too long.
+- **The open file is never removed.** The day currently being written is skipped
+  regardless of the cutoff.
+
+The server enforces retention at startup and hourly thereafter when started with
+`-retain`. Without the flag nothing is deleted. The dashboard reports the window
+in its storage panel, so a missing day has a stated reason rather than looking
+like data loss.
+
 ## 3. Percentiles
 
 Percentiles are read off cumulative counts in a fixed-bucket histogram, not

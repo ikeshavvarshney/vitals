@@ -92,6 +92,8 @@ Verified against real sites in Chrome 152. Other browsers are untested.
   is visible rather than inferred
 - Time series and per-route breakdown, with any route usable as a filter for
   the whole page
+- Live updates over Server-Sent Events: the numbers move as visits arrive, with
+  no polling
 - Export a window as JSON, or as a prompt for an AI agent to read
 - `vitals report` prints the same figures in a terminal, no browser needed
 - Disk usage reported from the files, with optional day-granular retention
@@ -121,8 +123,8 @@ vitals/
 ├── deps-proof.txt       go.mod, go list -m all, go version
 ├── .zero-dep.toml       track letter and one-line pitch
 ├── src/
-│   ├── cmd/vitals/      the binary: flags, shutdown, logging
-│   ├── server/          the only exported package: store plus route table
+│   ├── cmd/vitals/      the binary: flags, shutdown, logging, vitals report
+│   ├── server/          the only exported package: Open, Handler, Report, Usage
 │   ├── internal/        beacon, ingest, store, stats, dash, demo, httpx
 │   └── tools/           dependency check, hashing, beacon size reporting
 ├── tests/               black-box tests over the served HTTP surface
@@ -166,7 +168,7 @@ SHA-256 (build 2): [see the ci run for this commit]
 Built with:
 
 ```
-CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o vitals ./cmd/vitals
+CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o vitals ./src/cmd/vitals
 ```
 
 Each flag removes one source of variation. `-trimpath` strips local filesystem
@@ -191,7 +193,7 @@ run `make repro` and confirm your own two builds agree.
 
 ## Beacon size
 
-Measured with `go run ./tools/compare`, which compresses every file with the
+Measured with `go run ./src/tools/compare`, which compresses every file with the
 same gzip implementation. Comparing our file with one compressor and Google's
 with another produces a difference of a few percent that is an artefact of the
 tooling, so all three rows below come from one run.
@@ -207,7 +209,7 @@ beacon exceeds it. To reproduce the comparison rows:
 
 ```bash
 curl -O https://unpkg.com/web-vitals@4.2.4/dist/web-vitals.iife.js
-go run ./tools/compare web-vitals.iife.js
+go run ./src/tools/compare web-vitals.iife.js
 ```
 
 **This is not quite a like-for-like comparison, and the difference favours us
@@ -261,6 +263,17 @@ not an oversight.
 cache restoration handling, no soft-navigation support, less defensive coding
 around older Safari. It is correct on current Chrome, Firefox, and Safari for a
 normal page load.
+
+**Retention deletes whole days.** With `-retain` set, expiry removes an entire
+day log at a time and never rewrites a file, because a partially rewritten
+append log is a corrupt one. A day is kept until every record it could hold is
+older than the window, so the tool keeps slightly more than asked rather than
+slightly less. Without the flag nothing is deleted and `data/` grows forever.
+
+**Live updates carry no figures.** The event stream sends a route and a
+timestamp; the dashboard re-reads the API. A dashboard that has fallen more than
+eight notifications behind starts missing them and catches up on the next one,
+which is invisible in practice because a notification only means "re-read".
 
 **Storage is a single-node append log with an in-memory index.** No replication,
 no compaction, no query planner. At the scale this targets (one site), that is

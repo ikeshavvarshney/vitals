@@ -17,6 +17,7 @@ downloaded yourself. Neither is part of the build.
 |---|---|
 | `make` | Build the binary |
 | `make run` | Build and serve dashboard, demo, and API on `:8080` |
+| `make report` | Print the last 24 hours in the terminal |
 | `make test` | Run the test suite |
 | `make race` | Run the suite under the race detector, inside Docker |
 | `make check` | Fail on any dependency violation |
@@ -32,6 +33,22 @@ downloaded yourself. Neither is part of the build.
 |---|---|---|
 | `-addr` | `:8080` | Listen address |
 | `-data` | `data` | Directory for measurement storage |
+| `-retain` | `0` | Delete day logs older than this, for example `720h`. `0` keeps everything |
+
+### Subcommands
+
+```bash
+vitals                      # serve
+vitals report               # print the last 24 hours as a table
+vitals report -window 168h -p 95 -route /pricing
+vitals report -json         # the document GET /api/report returns
+vitals help
+```
+
+`report` opens the data directory, prints, and exits. It never listens, ingests,
+or prunes, so running it against a directory a live server is writing to is
+safe. It builds its document through the same code path as the API, so the two
+cannot disagree.
 
 ## 4. The one rule
 
@@ -76,16 +93,38 @@ which is why this project avoids the development-dependency question entirely.
 | `src/internal/stats` | Known distributions, skew, the error bound, merging, overflow |
 | `src/internal/store` | Restart survival, corrupt and truncated lines, day rotation, out-of-order arrival, concurrency |
 | `src/internal/httpx` | Conditional requests, gzip negotiation, MIME mapping, path traversal |
-| `src/internal/dash` | Parameter parsing, every endpoint, response shapes |
+| `src/internal/dash` | Parameter parsing, every endpoint, response shapes, event broadcasting and frame quoting |
 | `src/internal/beacon` | Size budget, minification, source and minified agreement |
-| `src/cmd/vitals` | End-to-end: post a payload, read it back through the API |
+| `src/cmd/vitals` | The report subcommand: table output, `-json`, flag validation, dispatch |
+| `tests/` | Black box over HTTP: every route, JSON contracts, asset invariants, the live stream, storage and retention |
+
+Unit tests live in the package they cover, because Go compiles a package's tests
+from that package's own directory and only from there can they reach the
+unexported parsers and arithmetic that carry the risk. `tests/` holds what is
+visible over HTTP. [`tests/README.md`](../tests/README.md) maps each layer to
+the tests that cover it.
 
 The ingest parser has a fuzz target, since it is the only place the program
 reads untrusted input:
 
 ```bash
-go test ./internal/ingest -run=FuzzParse -fuzz=FuzzParse -fuzztime=60s
+go test ./src/internal/ingest -run=FuzzParse -fuzz=FuzzParse -fuzztime=60s
 ```
+
+### JavaScript is served, never executed, by the test suite
+
+Go tests embed and serve `dash.js`, `snapshot.js`, and the beacon. Nothing in
+the suite runs them, so a syntax error passes every test and produces a blank
+dashboard. Before finishing any change to an asset:
+
+```bash
+node --check src/internal/dash/assets/dash.js
+node --check src/internal/dash/assets/snapshot.js
+```
+
+Node is a developer convenience here, not a dependency: nothing in the build,
+the binary, or CI needs it, and loading the page in a browser proves the same
+thing.
 
 ### Race detector
 
@@ -131,7 +170,7 @@ tested.**
 `.github/workflows/ci.yml` runs on every push and pull request:
 
 1. Print `go.mod` and assert `go list -m all` reports no dependencies
-2. `go run ./tools/check .`
+2. `go run ./src/tools/check .`
 3. Verify `gofmt` reports nothing
 4. `go vet ./...`
 5. `go test ./...`
@@ -142,7 +181,7 @@ tested.**
 ## 7. Reproducible build
 
 ```
-CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o vitals ./cmd/vitals
+CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o vitals ./src/cmd/vitals
 ```
 
 Each flag removes one source of variation. `-trimpath` strips local filesystem
