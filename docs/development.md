@@ -19,6 +19,7 @@ downloaded yourself. Neither is part of the build.
 | `make run` | Build and serve dashboard, demo, and API on `:8080` |
 | `make report` | Print the last 24 hours in the terminal |
 | `make test` | Run the test suite |
+| `make bench` | Print the storage benchmarks published in `docs/storage.md` |
 | `make race` | Run the suite under the race detector, inside Docker |
 | `make check` | Fail on any dependency violation |
 | `make beacon` | Print the beacon size and enforce the 1KB budget |
@@ -27,6 +28,10 @@ downloaded yourself. Neither is part of the build.
 | `make repro` | Build twice and print both SHA-256 hashes |
 | `make clean` | Remove build output |
 
+Every target wraps one Go command, so `make` is a convenience and never a
+requirement. [`README.md`](../README.md#build-targets) lists the command each
+one runs, for building without it.
+
 ## 3. Flags
 
 | Flag | Default | Meaning |
@@ -34,6 +39,13 @@ downloaded yourself. Neither is part of the build.
 | `-addr` | `:8080` | Listen address |
 | `-data` | `data` | Directory for measurement storage |
 | `-retain` | `0` | Delete day logs older than this, for example `720h`. `0` keeps everything |
+| `-rate` | `0`, meaning 5 | Collection payloads per second per client address. `0` selects the built-in default of 5; a negative value disables the limit |
+| `-burst` | `0`, meaning 40 | How many payloads one address may send at once before the rate applies. `0` selects the built-in default of 40 |
+
+One page view produces one payload, so a real visitor spends burst rather than
+rate even with several tabs open. The limit keys on the client address with
+forwarded headers ignored, so behind a reverse proxy every visitor shares one
+bucket: run with `-rate -1` and limit at the proxy instead.
 
 ### Subcommands
 
@@ -89,14 +101,14 @@ which is why this project avoids the development-dependency question entirely.
 
 | Area | What is covered |
 |---|---|
-| `src/internal/ingest` | Malformed input, escapes, surrogates, size limits, plus a fuzz target |
+| `src/internal/ingest` | Malformed input, escapes, surrogates, size limits, duplicate suppression, the token bucket and its eviction, plus a fuzz target |
 | `src/internal/stats` | Known distributions, skew, the error bound, merging, overflow |
-| `src/internal/store` | Restart survival, corrupt and truncated lines, day rotation, out-of-order arrival, concurrency |
+| `src/internal/store` | Restart survival, corrupt and truncated lines, day rotation, out-of-order arrival, index correctness after an insert, concurrency, plus benchmarks for append, scan, replay and encoding |
 | `src/internal/httpx` | Conditional requests, gzip negotiation, MIME mapping, path traversal |
-| `src/internal/dash` | Parameter parsing, every endpoint, response shapes, event broadcasting and frame quoting |
+| `src/internal/dash` | Parameter parsing, every endpoint including journeys, response shapes, band ranking, event broadcasting and frame quoting |
 | `src/internal/beacon` | Size budget, minification, source and minified agreement |
-| `src/cmd/vitals` | The report subcommand: table output, `-json`, flag validation, dispatch |
-| `tests/` | Black box over HTTP: every route, JSON contracts, asset invariants, the live stream, storage and retention |
+| `src/cmd/vitals` | The report subcommand: table output, `-json`, flag validation, dispatch, and the address printed in the startup banner |
+| `tests/` | Black box over HTTP: every route, JSON contracts, asset invariants, the live stream, storage and retention, the full beacon's attribution fields, and a crash test that kills a real process |
 
 Unit tests live in the package they cover, because Go compiles a package's tests
 from that package's own directory and only from there can they reach the
@@ -109,6 +121,22 @@ reads untrusted input:
 
 ```bash
 go test ./src/internal/ingest -run=FuzzParse -fuzz=FuzzParse -fuzztime=60s
+```
+
+### The crash test builds and kills the binary
+
+`tests/crash_test.go` is the only test that leaves the process. It compiles the
+binary with `go build`, starts it as a child on a reserved loopback port, posts
+measurements over HTTP, kills it with `Process.Kill`, and opens a second server
+on the same data directory.
+
+This exists because the durability claim is about a process that dies without
+warning, and a test that only exercises a clean `Close` does not test it. It
+takes about thirty seconds and needs a free port, so it is skipped under
+`-short`:
+
+```bash
+go test ./... -short     # everything except the crash tests
 ```
 
 ### JavaScript is served, never executed, by the test suite

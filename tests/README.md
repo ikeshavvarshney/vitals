@@ -32,7 +32,7 @@ of the risk. Moving them here would mean exporting `parseQuery`, `summarize`,
 | `src/internal/httpx` | The file server: ETags, conditional requests, gzip negotiation, cache policy, method handling. |
 | `src/internal/beacon` | The beacon's byte budget and that the minified form is the source's behaviour. |
 | `src/tools/check` | The dependency checker itself, which is what enforces the zero-dependency rule. |
-| `src/cmd/vitals` | The `report` subcommand: table output, `-json`, flag validation, and that a server flag is never mistaken for a subcommand. |
+| `src/cmd/vitals` | The `report` subcommand: table output, `-json`, flag validation, and that a server flag is never mistaken for a subcommand. The startup banner's address, which is the only instruction a new user is given. |
 
 ## Running
 

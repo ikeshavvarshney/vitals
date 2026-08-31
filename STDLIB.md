@@ -62,9 +62,8 @@ for.
 - **`winston` / `pino` / `zerolog` / `logrus`** → `log` with a prefix and no
   flags. This binary logs startup, shutdown, and errors: perhaps six lines over
   a run. Structured JSON logging, levels, sampling, and rotation are real
-  features that real services need, and we have none of those needs. If the
-  ingest path ever needed per-request logging, `log/slog` is also stdlib and
-  would be the next step, still with no dependency.
+  features that real services need, and we have none of those needs. `log/slog`
+  is also stdlib, so even structured logging would not have cost a dependency.
 
 ## Statistics
 
@@ -152,7 +151,7 @@ for.
   return a readable response cross-origin, which this one deliberately does not.
 
 - **`express-rate-limit` / `rate-limiter-flexible` / `golang.org/x/time/rate`**
-  → `internal/ingest.Limiter`, about 120 lines: a token bucket per client
+  → `internal/ingest.Limiter`, about 170 lines: a token bucket per client
   address, refilled lazily.
 
   `golang.org/x/time/rate` is the obvious answer in Go and is explicitly banned
@@ -326,15 +325,16 @@ for.
 
 ## Dashboard
 
-- **React / Vue / Svelte** → about 400 lines of vanilla JavaScript in
-  `dash.js`. The dashboard renders four API responses into a scorecard, a
-  chart, two tables, and a counter row, and re-renders the whole thing on each
-  refresh. There is no shared mutable state and no partial update, so the thing
-  a framework is for does not arise. A framework earns its place when state is
-  complex and updates are fine-grained; here the entire page is a pure function
-  of one fetch.
+- **React / Vue / Svelte** → about 1,200 lines of vanilla JavaScript in
+  `dash.js`. The dashboard renders six API responses into a scorecard, a
+  chart, two tables, a journeys panel, a blamed-elements panel, and a counter
+  row, and re-renders the whole thing on each refresh. There is no shared
+  mutable state and no partial update, so the thing a framework is for does not
+  arise. A framework earns its place when state is complex and updates are
+  fine-grained; here the entire page is a pure function of the responses to one
+  round of fetches.
 
-- **Chart.js / D3 / Recharts / ApexCharts** → about 120 lines building inline
+- **Chart.js / D3 / Recharts / ApexCharts** → about 150 lines building inline
   SVG with `createElementNS`. A `polyline` for the series, `line` for axes,
   grid, and thresholds, `circle` for points, `text` for ticks. Gaps in the data
   break the polyline instead of interpolating, which is a deliberate difference

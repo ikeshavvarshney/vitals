@@ -263,15 +263,29 @@ rating that nothing measured.
 
 On startup every log file is replayed into:
 
-- a slice of records **sorted by timestamp**, and
-- a map from **route to record offsets**.
+- a slice of records **sorted by timestamp**,
+- a map from **route to record offsets**, and
+- a map from **session to record offsets**.
 
-Time-range queries binary-search the sorted slice. Route queries use the map, so
-a query for one route out of hundreds does not scan the others.
+Time-range queries binary-search the sorted slice. Route queries use the route
+map, so a query for one route out of hundreds does not scan the others. The
+session map is what makes a single visitor's journey cheap: following one
+visitor is a 2.5 us index lookup rather than a scan of every record in the
+window.
 
-Records usually arrive in time order, but a slow beacon can land out of order,
-so an append inserts in place rather than assuming the tail. Out-of-order
-arrivals rebuild the route index, which is acceptable because they are rare.
+Records usually arrive in time order, but not reliably. The collector stamps a
+record with the wall clock and then takes the store lock as a separate step, so
+two page views that arrive together regularly land in the opposite order to
+their timestamps. An append therefore inserts in place rather than assuming the
+tail.
+
+An insert before the end shifts every offset above it in both secondary
+indexes. It used to rebuild them from scratch instead, which cost 0.7 to 1.0 ms
+at 5,000 records against 66 us for the shift, with the gap growing linearly as
+the store filled. Because out-of-order arrival is routine rather than rare, that
+was a real quadratic path on the hot side of the collector and not a
+theoretical one. The benchmarks are in [section 2b](#2b-measured-cost) and the
+regression test is `TestIndexesStayCorrectUnderOutOfOrderArrival`.
 
 ## 6. Constraints of this design
 
@@ -283,7 +297,7 @@ Stated explicitly, as these are the questions a reviewer should ask.
   The tool scales to one machine and no further.
 - **One writer only.** Two processes sharing a data directory will corrupt the
   log. There is no locking.
-- **No indexes beyond route.** A device-class or session query scans the range.
+- **No indexes beyond route and session.** A device-class query scans the range.
 - **No transactions, no crash-consistent guarantees** beyond skipping a
   truncated line.
 - **No query planner and no query language.** The API exposes five fixed shapes.

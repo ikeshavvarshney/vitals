@@ -171,6 +171,7 @@ vitals/
 ├── go.mod               the manifest: no require block
 ├── deps-proof.txt       go.mod, go list -m all, go version
 ├── .zero-dep.toml       track letter and one-line pitch
+├── .github/workflows/   CI: build, vet, test, race, dependency check, repro build
 ├── src/
 │   ├── cmd/vitals/      the binary: flags, shutdown, logging, vitals report
 │   ├── server/          the only exported package: Open, Handler, Report, Usage
@@ -423,14 +424,17 @@ so support there is claimed on standards compliance rather than on evidence.
 
 ## What was replaced
 
-See [`STDLIB.md`](STDLIB.md) for the full list: every package that would
-normally be here, what replaced it, and where the original is better.
+See [`STDLIB.md`](STDLIB.md) for the full list: 45 entries, each naming the
+package that would normally be here, what replaced it, and where the original
+is better.
 
 The short version: `express`, `serve-static`, `compression`, `etag`, and `cors`
 became `src/internal/httpx`. `web-vitals` became a hand-written beacon, and
 `web-vitals/attribution` a second one. `lru-cache` became a map beside a fixed
-ring. React, a bundler, and a charting library became vanilla JS emitting inline
-SVG. A database server and driver became an append log and a sorted slice.
+ring. `express-rate-limit`, and `golang.org/x/time/rate` which the event rules
+ban anyway, became a token bucket per address. React, a bundler, and a charting
+library became vanilla JS emitting inline SVG. A database server and driver
+became an append log and a sorted slice.
 
 ## Build targets
 
@@ -450,6 +454,7 @@ requirement. The last column is what to run without it.
 | `make repro` | Build twice, print both hashes | `go run ./src/tools/sha256sum <files>` |
 | `make beacon` | Print beacon size, enforce the 1KB budget | `go run ./src/tools/beaconsize` |
 | `make compare` | Print beacon size beside another script for comparison | `go run ./src/tools/compare <files>` |
+| `make clean` | Remove build output | `rm -f vitals vitals.exe vitals.repro1 vitals.repro2` |
 
 Verified on Windows with GNU Make 3.81 and on Linux with GNU Make 4.x. The only
 target that needs anything outside the Go toolchain is `make race`, which

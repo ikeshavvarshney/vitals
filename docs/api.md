@@ -36,6 +36,7 @@ flowchart LR
         series["GET /api/series"]
         routes["GET /api/routes"]
         devices["GET /api/devices"]
+        journeys["GET /api/journeys"]
         report["GET /api/report"]
         events["GET /api/events"]
     end
@@ -54,6 +55,7 @@ flowchart LR
     store --> series
     store --> routes
     store --> devices
+    store --> journeys
     store --> report
     collect --> events
 ```

@@ -56,8 +56,8 @@ one command with no configuration file and no external services.
 | `src/server` | The module's only exported package: opens the store and builds the route table |
 | `src/internal/httpx` | Static file serving: MIME, ETag, gzip, cache policy |
 | `src/internal/beacon` | Client script, embedded and size-checked |
-| `src/internal/ingest` | Payload parsing, validation, session derivation, counters |
-| `src/internal/store` | Append log, replay, in-memory index, range queries |
+| `src/internal/ingest` | Payload parsing, validation, session derivation, per-source rate limiting, duplicate suppression, counters |
+| `src/internal/store` | Append log, replay, in-memory indexes by time, route and session, range queries |
 | `src/internal/stats` | Histograms, approximate percentiles, banding |
 | `src/internal/dash` | JSON API handlers, the live event stream, and dashboard assets |
 | `src/internal/demo` | Bundled demo site |
@@ -149,7 +149,7 @@ Three properties this design holds to:
 ```mermaid
 sequenceDiagram
     participant P as Page
-    participant B as beacon.min.js
+    participant B as /b.js or /b-full.js
     participant H as Ingest handler
     participant S as Store
     participant D as Disk
@@ -160,9 +160,12 @@ sequenceDiagram
     P-->>B: visibilitychange to hidden
     B->>B: serialise one JSON object
     B->>H: POST /v1/collect (text/plain, sendBeacon)
+    H->>H: check the source's token bucket
+    Note over H: over its limit, the body is never read
     H->>H: cap body at 4096 bytes
     H->>H: parse and validate
     H->>H: derive session id
+    H->>H: drop a repeated page-view id
     H->>S: Append(record)
     S->>S: buffer write, update index
     H-->>B: 204 No Content
@@ -204,7 +207,9 @@ Every rejection is counted rather than reported to the client.
 flowchart TD
     start["POST /v1/collect"] --> method{"Method is POST?"}
     method -- no --> m405["405 Method Not Allowed"]
-    method -- yes --> size{"Body ≤ 4096 bytes?"}
+    method -- yes --> rate{"Source has<br/>tokens left?"}
+    rate -- no --> r429["429, counter: rateLimited"]
+    rate -- yes --> size{"Body ≤ 4096 bytes?"}
     size -- no --> ctooLarge["counter: tooLarge"]
     size -- yes --> parse{"Parses as one<br/>JSON object?"}
     parse -- no --> cmal["counter: malformed"]
@@ -212,21 +217,37 @@ flowchart TD
     route -- no --> cmal
     route -- yes --> metrics{"At least one<br/>known metric?"}
     metrics -- no --> cmal
-    metrics -- yes --> append["Append to store"]
+    metrics -- yes --> dupe{"Page-view id<br/>seen already?"}
+    dupe -- yes --> cdup["counter: duplicate"]
+    dupe -- no --> append["Append to store"]
     append -- error --> cerr["counter: storeErrors"]
     append -- ok --> cok["counter: accepted"]
 
     ctooLarge --> r204["204 No Content"]
     cmal --> r204
+    cdup --> r204
     cerr --> r204
     cok --> r204
 ```
 
-Returning `204` in every case is deliberate. A beacon cannot act on an error and
-will not retry usefully, and returning `4xx` to `sendBeacon` fills the visitor's
-console while still losing the sample. Counters are exposed through
-`/api/summary` and displayed on the dashboard, so rejections remain visible to
-the operator.
+Returning `204` for every rejected *payload* is deliberate. A beacon cannot act
+on an error and will not retry usefully, and returning `4xx` to `sendBeacon`
+fills the visitor's console while still losing the sample. Counters are exposed
+through `/api/summary` and displayed on the dashboard, so rejections remain
+visible to the operator.
+
+The rate limit is the one exception, and it is a different kind of rejection:
+`429` is aimed at the operator and at any proxy in front, not at the page, and
+nothing in either beacon reads the status. It is checked before the body is
+read, so a source over its limit costs one map lookup rather than a buffered
+read and a parse. The bucket is 5 payloads per second with a burst of 40 per
+client address, set with `-rate` and `-burst` and disabled with a negative
+`-rate`.
+
+Duplicate suppression is not validation and does not mean the payload was
+wrong. The full beacon stamps each page view with an identifier so that a
+payload sent twice, which the send-on-hide plus send-on-unload path can produce,
+is stored once. The most recent 4096 identifiers are remembered.
 
 ## 6. Design decisions
 
@@ -259,6 +280,13 @@ Reads hold the read lock for the duration of iteration, so a callback passed to
 
 Ingest counters use `atomic.Uint64`.
 
+The rate limiter holds its own mutex, taken only for a map lookup and some
+arithmetic. Buckets are refilled lazily from the elapsed time rather than by a
+ticker, so an idle client costs one map entry and no goroutine. A sweep every
+five minutes drops sources idle for ten, and the table is capped at 8192
+sources with eviction of the least recently seen, so the defence cannot become
+the exhaustion it defends against.
+
 The event broadcaster has its own mutex, held only while walking the subscriber
 set. Sends are non-blocking, so a stalled dashboard cannot delay the collector
 that is publishing to it. A subscriber's cancel function is idempotent and is
@@ -277,9 +305,10 @@ The following are properties of the architecture rather than defects.
 | Single writer, no locking | Two processes sharing a data directory will corrupt the log |
 | Retention is day-granular | `-retain` drops whole day logs; a record is never deleted on its own, and without the flag `data/` grows forever |
 | No authentication | Dashboard and API are open to anyone who can reach the port |
-| No rate limiting on collection | A client can inflate the numbers |
+| The rate limit is per client address | Forwarded headers are ignored because they are spoofable, so behind a reverse proxy every visitor shares one bucket |
 | One event stream per dashboard | Connections scale with open tabs, not with traffic; each costs a goroutine and a keep-alive every 25s |
-| Route is the only secondary index | Device and session queries scan the range |
+| Route and session are the only secondary indexes | A device-class query scans the range |
+| No authentication on collection either | The rate limit bounds the damage from an unauthenticated writer; it does not prevent a determined one from inflating the numbers |
 
 At the intended scale, a single site producing thousands of page views per day,
 an append log with a sorted in-memory index is the appropriate design rather
