@@ -37,18 +37,22 @@ func main() {
 	addr := flag.String("addr", ":8080", "address to listen on")
 	dataDir := flag.String("data", "data", "directory for measurement storage")
 	retain := flag.Duration("retain", 0, "delete day logs older than this, for example 720h; 0 keeps everything")
+	rate := flag.Float64("rate", 0, "payloads per second accepted from one address; 0 uses the default, a negative value disables the limit")
+	burst := flag.Float64("burst", 0, "payloads one address may send at once before -rate applies; 0 uses the default")
 	flag.Parse()
 
-	if err := run(*addr, *dataDir, *retain); err != nil {
+	if err := run(*addr, *dataDir, *retain, *rate, *burst); err != nil {
 		log.Fatal(err)
 	}
 }
 
 // run wires the server together and blocks until it is asked to stop.
-func run(addr, dataDir string, retain time.Duration) error {
+func run(addr, dataDir string, retain time.Duration, rate, burst float64) error {
 	app, err := server.OpenWith(dataDir, server.Options{
-		Retention: retain,
-		Logf:      log.Printf,
+		Retention:    retain,
+		Logf:         log.Printf,
+		CollectRate:  rate,
+		CollectBurst: burst,
 	})
 	if err != nil {
 		return err

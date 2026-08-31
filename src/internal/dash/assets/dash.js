@@ -750,6 +750,7 @@
     var items = [
       ['Accepted', data.ingest.accepted, false],
       ['Duplicate', data.ingest.duplicate, false],
+      ['Rate limited', data.ingest.rateLimited, data.ingest.rateLimited > 0],
       ['Malformed', data.ingest.malformed, data.ingest.malformed > 0],
       ['Too large', data.ingest.tooLarge, data.ingest.tooLarge > 0],
       ['Store errors', data.ingest.storeErrors, data.ingest.storeErrors > 0],

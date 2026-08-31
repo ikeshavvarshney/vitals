@@ -117,9 +117,9 @@ func printReport(out io.Writer, rep server.Report) {
 		fmt.Fprintf(out, "\nStorage  %d record(s) in %d day log(s), %s on disk, %.0f B per record\n",
 			c.Total, c.Files, formatBytes(c.Bytes), c.BytesPerRecord)
 	}
-	fmt.Fprintf(out, "Ingest   %d accepted, %d duplicate, %d malformed, %d too large, %d store error(s)\n",
-		rep.Ingest.Accepted, rep.Ingest.Duplicate, rep.Ingest.Malformed,
-		rep.Ingest.TooLarge, rep.Ingest.StoreErrors)
+	fmt.Fprintf(out, "Ingest   %d accepted, %d duplicate, %d rate limited, %d malformed, %d too large, %d store error(s)\n",
+		rep.Ingest.Accepted, rep.Ingest.Duplicate, rep.Ingest.RateLimited,
+		rep.Ingest.Malformed, rep.Ingest.TooLarge, rep.Ingest.StoreErrors)
 
 	fmt.Fprintln(out, "\nThese figures are approximate. Percentiles are read off histogram")
 	fmt.Fprintln(out, "buckets: up to 4.9% relative error on millisecond metrics, 0.0025")

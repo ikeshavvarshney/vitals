@@ -277,7 +277,10 @@ func TestClientIP(t *testing.T) {
 
 func TestHandlerConcurrent(t *testing.T) {
 	fs := &fakeStore{}
-	h := NewHandler(fs)
+	// Rate limiting off: every request here comes from the same test address,
+	// so the default burst would refuse most of them and this test is about
+	// concurrent appends rather than about the limiter.
+	h := NewHandlerWithLimit(fs, 0, 0)
 
 	const n = 100
 	var wg sync.WaitGroup

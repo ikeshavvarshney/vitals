@@ -44,6 +44,10 @@ type Counters struct {
 	// Duplicate is the number dropped because a payload carrying the same
 	// page-view identifier had already been stored.
 	Duplicate uint64 `json:"duplicate"`
+	// RateLimited is the number refused because their source had spent its
+	// allowance. A non-zero value here on a site with real traffic means the
+	// limit is set too low, not that an attack is under way.
+	RateLimited uint64 `json:"rateLimited"`
 }
 
 // Handler accepts beacon payloads at POST /v1/collect.
@@ -56,27 +60,41 @@ type Handler struct {
 	// block: the collector's answer to the beacon waits on it.
 	onRecord func(store.Record)
 
-	recent *recentIDs
+	recent  *recentIDs
+	limiter *Limiter
 
 	accepted    atomic.Uint64
 	malformed   atomic.Uint64
 	tooLarge    atomic.Uint64
 	storeErrors atomic.Uint64
 	duplicate   atomic.Uint64
+	rateLimited atomic.Uint64
 }
 
 // OnRecord registers a function called after each accepted measurement is
 // stored. It replaces any previous one and must be set before serving.
 func (h *Handler) OnRecord(fn func(store.Record)) { h.onRecord = fn }
 
-// NewHandler returns a Handler that appends accepted payloads to s.
+// NewHandler returns a Handler that appends accepted payloads to s, rate
+// limited at the defaults.
 func NewHandler(s Appender) *Handler {
+	return NewHandlerWithLimit(s, DefaultRate, DefaultBurst)
+}
+
+// NewHandlerWithLimit is [NewHandler] with an explicit per-source rate and
+// burst. A rate or burst of zero or less disables the limit.
+func NewHandlerWithLimit(s Appender, rate, burst float64) *Handler {
 	return &Handler{
-		store:  s,
-		now:    func() time.Time { return time.Now().UTC() },
-		recent: newRecentIDs(dedupeWindow),
+		store:   s,
+		now:     func() time.Time { return time.Now().UTC() },
+		recent:  newRecentIDs(dedupeWindow),
+		limiter: NewLimiter(rate, burst),
 	}
 }
+
+// Limiter returns the rate limiter, so the server can sweep idle sources out of
+// it. It is never nil.
+func (h *Handler) Limiter() *Limiter { return h.limiter }
 
 // Counters returns a snapshot of the endpoint's counters.
 func (h *Handler) Counters() Counters {
@@ -86,6 +104,7 @@ func (h *Handler) Counters() Counters {
 		TooLarge:    h.tooLarge.Load(),
 		StoreErrors: h.storeErrors.Load(),
 		Duplicate:   h.duplicate.Load(),
+		RateLimited: h.rateLimited.Load(),
 	}
 }
 
@@ -101,6 +120,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// The allowance is spent before the body is read, so a source that is over
+	// its limit costs this server one map lookup rather than a buffered read
+	// and a parse. This is the only check that runs ahead of parsing, and it is
+	// deliberately first for that reason.
+	//
+	// 429 rather than the endpoint's usual 204: a refusal that the beacon
+	// cannot distinguish from acceptance would let a misconfigured client
+	// hammer the endpoint forever without either side noticing. Nothing in the
+	// beacon retries, so the status is for the operator and the proxy in front,
+	// not for the page.
+	if ip := clientIP(r); !h.limiter.Allow(ip) {
+		h.rateLimited.Add(1)
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "too many requests", http.StatusTooManyRequests)
 		return
 	}
 

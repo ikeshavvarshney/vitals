@@ -30,17 +30,24 @@ type Options struct {
 	// Logf receives operational notes, such as how many day logs a prune
 	// removed. Nil discards them.
 	Logf func(format string, args ...any)
+	// CollectRate and CollectBurst bound how fast one source may post
+	// measurements. The zero value means the defaults; a negative rate
+	// disables the limit, which is only sensible behind a trusted proxy that
+	// applies its own.
+	CollectRate  float64
+	CollectBurst float64
 }
 
 // Server is a running instance's state: the record store and the handler over
 // it. Close it to flush buffered records.
 type Server struct {
-	store   *store.Store
-	api     *dash.API
-	handler http.Handler
-	skipped int
-	opts    Options
-	stop    chan struct{}
+	store     *store.Store
+	api       *dash.API
+	handler   http.Handler
+	collector *ingest.Handler
+	skipped   int
+	opts      Options
+	stop      chan struct{}
 }
 
 // Open reads any existing measurements in dataDir, creating it if needed, and
@@ -62,7 +69,9 @@ func OpenWith(dataDir string, opts Options) (*Server, error) {
 		return nil, fmt.Errorf("opening store: %w", err)
 	}
 
-	handler, api, err := routes(db)
+	rate, burst := opts.collectLimit()
+
+	handler, api, collector, err := routes(db, rate, burst)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -70,19 +79,61 @@ func OpenWith(dataDir string, opts Options) (*Server, error) {
 	api.SetRetention(opts.Retention)
 
 	s := &Server{
-		store:   db,
-		api:     api,
-		handler: handler,
-		skipped: skipped,
-		opts:    opts,
-		stop:    make(chan struct{}),
+		store:     db,
+		api:       api,
+		handler:   handler,
+		collector: collector,
+		skipped:   skipped,
+		opts:      opts,
+		stop:      make(chan struct{}),
 	}
 
 	if opts.Retention > 0 {
 		s.prune()
 		go s.pruneLoop()
 	}
+	go s.sweepLoop()
 	return s, nil
+}
+
+// collectLimit resolves the rate limit from the options. A zero rate means the
+// caller did not choose, so the defaults apply; a negative one is an explicit
+// request for no limit.
+func (o Options) collectLimit() (rate, burst float64) {
+	switch {
+	case o.CollectRate < 0:
+		return 0, 0
+	case o.CollectRate == 0:
+		return ingest.DefaultRate, ingest.DefaultBurst
+	}
+
+	burst = o.CollectBurst
+	if burst <= 0 {
+		burst = o.CollectRate
+	}
+	return o.CollectRate, burst
+}
+
+// sweepInterval is how often idle sources are dropped from the rate limiter.
+// A source idle this long has a full bucket, so forgetting it changes nothing
+// but the memory it holds.
+const sweepInterval = 5 * time.Minute
+
+// sweepLoop drops idle rate-limiter entries until the server is closed.
+func (s *Server) sweepLoop() {
+	t := time.NewTicker(sweepInterval)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-t.C:
+			if n := s.collector.Limiter().Sweep(); n > 0 {
+				s.opts.Logf("rate limit: forgot %d idle source(s)", n)
+			}
+		case <-s.stop:
+			return
+		}
+	}
 }
 
 // pruneInterval is how often retention is enforced while running. Expiry is
@@ -161,10 +212,10 @@ func (s *Server) Close() error {
 // routes builds the complete HTTP handler. Dashboard, demo site, beacon,
 // collection endpoint, and JSON API all share one mux on one port, which is what
 // lets the whole tool be one command with no configuration.
-func routes(db *store.Store) (http.Handler, *dash.API, error) {
+func routes(db *store.Store, rate, burst float64) (http.Handler, *dash.API, *ingest.Handler, error) {
 	mux := http.NewServeMux()
 
-	collector := ingest.NewHandler(db)
+	collector := ingest.NewHandlerWithLimit(db, rate, burst)
 	mux.Handle("/v1/collect", collector)
 
 	api := dash.NewAPI(db, collector.Counters)
@@ -179,7 +230,7 @@ func routes(db *store.Store) (http.Handler, *dash.API, error) {
 
 	beaconHandler, err := beacon.Handler()
 	if err != nil {
-		return nil, nil, fmt.Errorf("preparing beacon: %w", err)
+		return nil, nil, nil, fmt.Errorf("preparing beacon: %w", err)
 	}
 	mux.Handle("GET "+beacon.Path, beaconHandler)
 	mux.Handle("GET /beacon.src.js", beaconHandler)
@@ -188,7 +239,7 @@ func routes(db *store.Store) (http.Handler, *dash.API, error) {
 
 	demoHandler, err := demo.Handler()
 	if err != nil {
-		return nil, nil, fmt.Errorf("preparing demo site: %w", err)
+		return nil, nil, nil, fmt.Errorf("preparing demo site: %w", err)
 	}
 	mux.Handle("GET "+demo.Prefix, demoHandler)
 
@@ -205,11 +256,11 @@ func routes(db *store.Store) (http.Handler, *dash.API, error) {
 	// The file server answers non-GET with 405 itself.
 	dashHandler, err := dash.Assets()
 	if err != nil {
-		return nil, nil, fmt.Errorf("preparing dashboard: %w", err)
+		return nil, nil, nil, fmt.Errorf("preparing dashboard: %w", err)
 	}
 	mux.Handle("/", dashHandler)
 
-	return mux, api, nil
+	return mux, api, collector, nil
 }
 
 // BeaconPath is where the minified beacon is served, exported so an embedder
