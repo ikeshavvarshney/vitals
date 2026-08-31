@@ -17,8 +17,10 @@ pagination.
 | `GET` | `/api/devices` | One metric broken down by device class |
 | `GET` | `/api/report` | Every metric at once, with quantiles, band counts, and breakdowns |
 | `GET` | `/api/events` | Server-Sent Events: one notification per recorded measurement |
-| `GET` | `/b.js` | The minified beacon |
+| `GET` | `/b.js` | The minified beacon, 942 bytes |
 | `GET` | `/beacon.src.js` | The readable beacon source |
+| `GET` | `/b-full.js` | The minified full beacon, 2,656 bytes |
+| `GET` | `/beacon.full.src.js` | The readable full beacon source |
 | `GET` | `/demo/` | The bundled demo site |
 | `GET` | `/healthz` | Liveness check, returns `ok` |
 | `GET` | `/` | The dashboard |
@@ -39,6 +41,8 @@ flowchart LR
     subgraph assets["Static"]
         bjs["GET /b.js"]
         src["GET /beacon.src.js"]
+        bfull["GET /b-full.js"]
+        fsrc["GET /beacon.full.src.js"]
         demo["GET /demo/"]
         root["GET /"]
         health["GET /healthz"]
@@ -80,8 +84,28 @@ for a non-`POST` method.
 | Metric key count | 32 | Counted as `malformed` |
 | Route length | 512 bytes, truncated on a rune boundary | Truncated |
 | Viewport width | 0 to 65535 | Ignored outside range |
+| Page-view id `i` | Lowercase base-36, 32 bytes | Dropped, payload still stored |
+| Duplicate `i` | Last 4096 identifiers seen | Counted as `duplicate`, not stored |
+| Navigation type `n` | One of six known values | Dropped, payload still stored |
+| Attribution keys | `lcp`, `inp`, `cls`, `fcp`, `ttfb` | Unknown keys dropped |
+| Attribution key count | 8 | Counted as `malformed` |
+| Attribution value type | Must be a JSON string | Counted as `malformed` |
+| Attribution value | Control characters removed, invalid UTF-8 replaced, capped at 128 bytes | Cleaned; an empty result is dropped |
 
 The route has its query string and fragment stripped before storage.
+
+`i`, `n`, and `a` are optional and only the full beacon at `/b-full.js` sends
+them. The six accepted navigation types are `navigate`, `reload`,
+`back_forward`, `prerender`, `back-forward-cache`, and `soft-navigation`; the
+first four come from the browser's navigation entry and the last two are the
+beacon's own labels for a page view no navigation entry describes.
+
+An attribution value is the only free-form string in the payload that reaches
+the dashboard, so it is the field a hostile client would aim at. It is cleaned
+rather than rejected, and the dashboard renders it with `textContent`, never
+`innerHTML`. Angle brackets are deliberately preserved: mangling them would make
+a legitimate selector unrecognisable without making an illegitimate one any
+safer.
 
 ## 3. Query parameters
 
@@ -155,7 +179,7 @@ pick up until the hour is out.
       "unit": "ms"
     }
   ],
-  "ingest": { "accepted": 1284, "malformed": 3, "tooLarge": 0, "storeErrors": 0 },
+  "ingest": { "accepted": 1284, "duplicate": 2, "malformed": 3, "tooLarge": 0, "storeErrors": 0 },
   "compared": { "from": "2026-08-28T12:00:00Z", "to": "2026-08-29T12:00:00Z", "samples": 1190 },
   "coverage": { "total": 5012, "oldest": "2026-08-25T09:14:02Z", "newest": "2026-08-30T11:58:41Z" },
   "beaconBytes": 942
@@ -279,10 +303,17 @@ p90, and p95 whatever `p` asks for; `p` selects only which one `band` rates.
       ],
       "worstDevices": [
         { "key": "mobile", "value": 4900, "band": "poor", "samples": 402 }
+      ],
+      "offenders": [
+        { "selector": "img.hero", "samples": 88, "poor": 71 }
       ]
     }
   ],
-  "ingest": { "accepted": 1028, "malformed": 0, "tooLarge": 0, "storeErrors": 0 },
+  "ingest": { "accepted": 1028, "duplicate": 2, "malformed": 0, "tooLarge": 0, "storeErrors": 0 },
+  "navigation": [
+    { "type": "navigate", "samples": 902 },
+    { "type": "soft-navigation", "samples": 126 }
+  ],
   "coverage": { "total": 4102, "oldest": "2026-08-24T09:11:02Z", "newest": "2026-08-30T11:58:44Z" },
   "beaconBytes": 942,
   "caveats": ["Percentiles are approximate. ..."]
@@ -302,6 +333,16 @@ Notes on the fields that are not in the other endpoints:
 - `min`, `max`, `mean`, and the `quantiles` map are absent when a metric has no
   samples in the window, and `band` is an empty string. An absent metric was
   not measured, which is not the same as being fast.
+- `offenders` names the elements blamed for that metric, ranked by how many of
+  the page views naming them were rated poor and then by how often they were
+  named at all. Ranking on the poor count is what makes the list useful: the
+  element named on every page view is usually the hero image, and it is only
+  interesting when the pages carrying it are slow. Capped at five rows like the
+  other breakdowns. It is `null` for a metric no record attributed, which is
+  every metric on a site running only `/b.js`.
+- `navigation` counts how the page views in the window began, most common first,
+  and is `null` when no record carried a type. Like `offenders` it is populated
+  only by `/b-full.js`.
 - `caveats` restates the dashboard's footnotes inside the payload, so a report
   that travels somewhere else takes its disclosures with it.
 

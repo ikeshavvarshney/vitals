@@ -6,9 +6,12 @@ dependency manifest.
 The tool that measures page weight should not be page weight. A mainstream
 analytics snippet is 30-60KB of third-party JavaScript on every page view. This
 one is **942 bytes**, served from your own origin: 7.7x smaller than Google's
-`web-vitals`, and it includes the transport that `web-vitals` leaves to you. The
-backend it talks to has no database server, no driver, no charting library, and
-no framework.
+`web-vitals`, and it includes the transport that `web-vitals` leaves to you.
+A second **2,656-byte** build is served alongside it for sites that want real
+interaction-grouped INP, back-forward cache handling, soft navigations, and the
+name of the element responsible: still 4.7x smaller than the `web-vitals` build
+that does the same things. The backend they talk to has no database server, no
+driver, no charting library, and no framework.
 
 ```
 $ cat go.mod
@@ -75,6 +78,20 @@ Locally that origin is `http://localhost:8080`. The script collects LCP, CLS,
 INP, TTFB, and FCP, buffers them, and sends one small payload when the page is
 hidden. It sets no cookie and no persistent identifier.
 
+If the site is a single-page app, or you want to know *which* element is
+responsible rather than only that a metric is bad, use the full build instead:
+
+```html
+<script src="https://vitals.example.com/b-full.js" defer></script>
+```
+
+It is 2,656 bytes and adds real interaction-grouped INP, back-forward cache
+restores, soft navigations, prerender correction, and one element selector per
+metric. Both post to the same endpoint and land in the same store, so a site can
+run one on some pages and the other elsewhere. The demo site does exactly that:
+the fast control page carries `/b.js` and the three broken pages carry
+`/b-full.js`.
+
 ## Measuring a page you do not control
 
 The beacon requires access to a site's HTML, which you will not have for a site
@@ -108,6 +125,10 @@ Verified against real sites in Chrome 152. Other browsers are untested.
 ## What it does
 
 - Collects the five Core Web Vitals with `PerformanceObserver`
+- Two beacons: 942 bytes for a normal page load, or 2,656 for real INP,
+  back-forward cache, soft navigations, prerender correction, and element
+  attribution
+- Names the element blamed for a bad LCP, layout shift, or interaction
 - Ingests over HTTP, stores on local disk, survives restart
 - Dashboard with p50, p75, p90 or p95 per metric, banded good / needs
   improvement / poor
@@ -230,14 +251,21 @@ same gzip implementation. Comparing our file with one compressor and Google's
 with another produces a difference of a few percent that is an artefact of the
 tooling, so all three rows below come from one run.
 
-| | Raw | Gzipped | vs ours (raw) | vs ours (gzip) |
+| | Raw | Gzipped | vs `/b.js` (raw) | vs `/b.js` (gzip) |
 |---|---|---|---|---|
-| **`vitals` beacon** | **942 B** | **571 B** | - | - |
+| **`vitals` beacon, `/b.js`** | **942 B** | **571 B** | - | - |
+| **`vitals` full beacon, `/b-full.js`** | **2,656 B** | **1,415 B** | 2.8x | 2.5x |
 | `web-vitals` 4.2.4 `iife` | 7,226 B | 2,601 B | 7.7x | 4.6x |
 | `web-vitals` 4.2.4 `attribution.iife` | 12,505 B | 4,172 B | 13.3x | 7.3x |
 
-`make beacon` enforces the 1024-byte raw budget and fails the build if the
-beacon exceeds it. To reproduce the comparison rows:
+The comparison that is actually like-for-like is row two against row four, the
+two builds with attribution and real INP: **4.7x smaller raw, 2.9x gzipped**.
+Row one against row three is the pair a site chooses between by default.
+
+`make beacon` enforces a budget on each build and fails if either is exceeded:
+1,024 raw bytes for `/b.js`, 2,816 for `/b-full.js`. Two budgets rather than one
+raised budget, because the sub-1KB claim is about the script a site puts on
+every page by default. To reproduce the comparison rows:
 
 ```bash
 curl -O https://unpkg.com/web-vitals@4.2.4/dist/web-vitals.iife.js
@@ -252,32 +280,42 @@ leaves transport entirely to you, so a real deployment adds your own reporting
 code on top of the sizes above. Our 942 bytes already include JSON
 serialisation, `sendBeacon`, the `fetch` fallback, and the flush-on-hide logic.
 
-In our favour: `web-vitals` is doing more work per metric. It handles
+In favour of `/b.js`: `web-vitals` is doing more work per metric. It handles
 back-forward cache restoration, prerendering and `activationStart`, soft
-navigations, and years of accumulated browser quirks, none of which we do. Those
-are not padding; they are the reason for most of the difference. The
-`attribution` build is larger still because it also reports *which element*
-caused a bad LCP or layout shift, which is genuinely useful and which we do not
-attempt at all.
+navigations, and years of accumulated browser quirks, none of which the 942-byte
+build does. Those are not padding; they are the reason for most of the
+difference.
 
-The honest summary: ours is smaller because it does less, and the things it
-does not do are real. It is correct for a normal page load on current Chrome,
-Firefox, and Safari, and that is the whole of the claim.
+`/b-full.js` exists to make that comparison fair. It does the first four of
+those, reports real interaction-grouped INP, and names the element responsible,
+in 2,656 bytes against the 12,505 of the `attribution` build. What it still does
+not do is the browser-quirk work, the subpart timing breakdown of an
+interaction, or long-animation-frame data.
+
+The honest summary: `/b.js` is smaller because it does less, and the things it
+does not do are real. `/b-full.js` does nearly all of them, and its own gap is
+that no browser has yet exercised those paths in the field. See
+[`docs/beacon.md`](docs/beacon.md#9-verification-status).
 
 ## Limits and honest notes
 
 This section is the point of the project, so it is specific.
 
-**INP is approximated.** See [`docs/beacon.md`](docs/beacon.md#4-what-is-collected-and-how-accurate-it-is).
-True INP requires tracking full interaction latency
-across all event entries and reporting a high percentile of them. This
-implementation reports the **maximum duration of any single event** longer than
-16ms, observed through `PerformanceObserver` with `durationThreshold: 16`. On a
-page with few interactions the two agree. On a page with many, the maximum is
-higher than the 98th percentile that real INP reports, so this number is
-pessimistic and wrong in the tail. It is labelled INP on the dashboard because
-that is the metric it approximates, and this paragraph is the correction.
-Google's `web-vitals` does this properly.
+**INP is approximated by `/b.js`, and real in `/b-full.js`.** See
+[`docs/beacon.md`](docs/beacon.md#4-what-is-collected-and-how-accurate-it-is).
+True INP requires tracking full interaction latency across all event entries and
+reporting a high percentile of them. The 942-byte beacon reports the **maximum
+duration of any single event** longer than 16ms. On a page with few interactions
+the two agree. On a page with many, the maximum is higher than the 98th
+percentile that real INP reports, so that number is pessimistic and wrong in the
+tail. The full beacon groups entries by `interactionId` and applies the
+specification's percentile rule, so its figure is the real one.
+
+**A window can mix the two.** Both beacons store INP under the same key and
+which beacon sent a sample is not recorded, so a site running both has a window
+containing an approximation and a real figure side by side. The report says so
+in its caveats. Recording it would mean a per-record field to untangle something
+that only matters while a site is migrating between the two.
 
 **Percentiles are bucketed, not exact.** Full arithmetic in [`docs/storage.md`](docs/storage.md#3-percentiles). Values go into log-spaced histogram
 buckets and p75 is read off cumulative counts. For the millisecond metrics the
@@ -291,10 +329,28 @@ make too.
 flushed on an interval. For performance telemetry this is a deliberate trade,
 not an oversight.
 
-**The beacon handles fewer browser cases than `web-vitals`.** No back-forward
-cache restoration handling, no soft-navigation support, less defensive coding
-around older Safari. It is correct on current Chrome, Firefox, and Safari for a
-normal page load.
+**The full beacon's own paths are untested in a browser.** Its server half is
+covered end to end, from the payload parser through to the rendered report, and
+its syntax is checked. What has not happened is a real browser exercising a
+bfcache restore, a soft navigation, a prerendered page, or an interaction
+grouped by `interactionId`. Those are written against the specifications and
+reviewed, not demonstrated. `/b.js` has been driven end to end in Chrome 152.
+This is the largest honest gap in the project and it is why `/b.js` remains the
+default.
+
+**Both beacons handle fewer browser quirks than `web-vitals`.** Years of
+accumulated workarounds, particularly for older Safari, are absent. `/b.js`
+additionally has no back-forward cache handling, no soft-navigation support, no
+prerender correction, and does not discard a paint reported after the page was
+first hidden, so a page opened in a background tab contributes an LCP nobody
+saw. `/b-full.js` does all four.
+
+**Element attribution is a selector, not a diagnosis.** The full beacon names
+one element per metric as a tag plus an id or first class. It is not a unique
+path, so identical sibling elements are counted as one, and it says which
+element rather than why it was slow. The `web-vitals` attribution build reports
+the subpart timing breakdown of an interaction and long-animation-frame data;
+this does not attempt either.
 
 **Retention deletes whole days.** With `-retain` set, expiry removes an entire
 day log at a time and never rewrites a file, because a partially rewritten
@@ -351,8 +407,9 @@ See [`STDLIB.md`](STDLIB.md) for the full list: every package that would
 normally be here, what replaced it, and where the original is better.
 
 The short version: `express`, `serve-static`, `compression`, `etag`, and `cors`
-became `src/internal/httpx`. `web-vitals` became a hand-written beacon. React, a
-bundler, and a charting library became 402 lines of vanilla JS emitting inline
+became `src/internal/httpx`. `web-vitals` became a hand-written beacon, and
+`web-vitals/attribution` a second one. `lru-cache` became a map beside a fixed
+ring. React, a bundler, and a charting library became vanilla JS emitting inline
 SVG. A database server and driver became an append log and a sorted slice.
 
 ## Build targets

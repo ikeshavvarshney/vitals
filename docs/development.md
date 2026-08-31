@@ -215,8 +215,8 @@ GOARCH produces a different and equally valid digest.
   page arguing against third-party runtime requests.
 - Accessibility floor: keyboard reachable, visible focus, `prefers-reduced-motion`
   respected, responsive to 360px, colour never the only signal.
-- The beacon has a hard 1024-byte raw budget, enforced by `make beacon` and by a
-  test.
+- Each beacon has a hard raw budget, 1,024 bytes for `/b.js` and 2,816 for
+  `/b-full.js`, enforced by `make beacon` and by a test.
 
 ## 10. Regenerating the demo site
 

@@ -22,13 +22,33 @@ One record per line:
 {"t":1756500000000,"u":"/pricing","s":"6dc1a67e","w":1440,"m":{"cls":0.06,"fcp":903.1,"inp":142,"lcp":1834.2,"ttfb":210.5}}
 ```
 
+A record from the full beacon carries two more keys:
+
+```json
+{"t":1756500000000,"u":"/checkout","s":"6dc1a67e","w":390,"n":"soft-navigation","a":{"cls":"div#promo","lcp":"img.hero"},"m":{"cls":0.21,"lcp":2400}}
+```
+
 | Key | Meaning |
 |---|---|
 | `t` | Server receive time, epoch milliseconds |
 | `u` | Route, query string and fragment already stripped |
 | `s` | Derived session id, 8 hex characters, omitted when empty |
 | `w` | Viewport width in CSS pixels, omitted when zero |
+| `n` | Navigation type, omitted when the beacon reported none |
+| `a` | Element blamed per metric, omitted when empty |
 | `m` | Metric values |
+
+`n` and `a` are omitted rather than written empty, so a site running only the
+942-byte beacon writes exactly the lines it wrote before this field existed and
+pays nothing for a feature it is not using. The format is forward and backward
+compatible in both directions: an old line replays into the current binary with
+those fields absent, and a line carrying them replays into an older binary,
+which ignores unknown keys.
+
+The page-view identifier the full beacon sends is **not** stored. It exists only
+to drop a payload delivered twice, duplicates arrive within seconds of each
+other, and the deduplication set lives in memory and is discarded on restart.
+Writing it to disk would add a per-record cost for a value nothing reads back.
 
 Files rotate on the UTC day boundary. UTC rather than local time because local
 time has daylight saving, which would make one file 23 hours long and another 25

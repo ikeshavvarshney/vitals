@@ -82,22 +82,35 @@ Common causes of a bad INP: long tasks blocking the main thread, an expensive
 event handler, large synchronous DOM work, or a heavy re-render triggered by
 every keystroke.
 
-**How `vitals` measures it, and where the approximation is:** an observer on the
-`event` entry type with `durationThreshold: 16`, keeping the **maximum single
-event duration** for the page view. That is not what real INP is.
+**How the default beacon measures it, and where the approximation is:** an
+observer on the `event` entry type with `durationThreshold: 16`, keeping the
+**maximum single event duration** for the page view. That is not what real INP
+is.
 
 - It ignores the percentile rule, so one unlucky interaction sets the score. On
   a page with many interactions our number is pessimistic in the tail.
 - The `duration` on an `event` entry is rounded to 8ms and does not decompose
-  into the three phases above, so there is no attribution.
+  into the three phases above, so there is no subpart breakdown.
 - `durationThreshold: 16` discards anything faster than one frame. None of those
   could ever be the maximum, so the filter does not change the result. It does
   mean a page whose every interaction is fast reports no INP at all rather than
   a small one.
 
-This is the one metric here that is an approximation rather than a measurement.
-It is stated on the dashboard, in the README, and in
-[`docs/beacon.md`](beacon.md).
+**How the full beacon measures it:** the same observer, but entries are grouped
+by `interactionId` first. Each interaction's latency is the longest event in it,
+and the reported value is the interaction one place in from the top for every 50
+interactions on the page, which is the percentile rule above. It also records
+the `target` of the interaction that set the score, so the dashboard can name
+the element. Two bounds remain and both can only under-report: only the ten
+longest interactions are retained, and an interaction evicted from that top ten
+never re-enters it.
+
+The approximation is therefore a property of `/b.js`, not of the tool. A window
+can contain samples from both beacons, in which case it mixes an approximation
+with a real figure; the report says so in its caveats rather than pretending
+otherwise. Which beacon sent a sample is not stored, so the mix cannot be
+untangled after the fact. All of this is stated on the dashboard, in the README,
+and in [`docs/beacon.md`](beacon.md).
 
 ## 4. CLS, Cumulative Layout Shift
 

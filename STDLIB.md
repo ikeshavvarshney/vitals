@@ -115,6 +115,16 @@ for.
   fuzzed by far more people than ours, and it supports streaming decode. Ours
   is fuzz-tested here (`FuzzParse`) precisely because that gap is real.
 
+- **`uuid` / `nanoid` for a per-page-view identifier** → eight characters of
+  `Math.random().toString(36)` plus the timestamp in base 36, one line in
+  `beacon.full.src.js`. It exists so a payload delivered twice is stored once,
+  never leaves the page view, and is not persisted in the browser or on disk.
+  `Math.random` is not cryptographically strong and does not need to be: a
+  collision costs one dropped duplicate, and `crypto.randomUUID` would have been
+  36 characters and unavailable on an insecure origin. Where the packages are
+  better: they are collision-resistant at a scale this is not, and
+  `crypto.randomUUID` is genuinely random where this is not.
+
 - **`uuid` / `nanoid` / `cuid` for visitor identifiers** → `crypto/sha256` over
   the address, user agent, and UTC date, truncated to 8 hex characters. A
   generated identifier would need to be stored somewhere to be stable, and
@@ -187,24 +197,94 @@ for.
   Where theirs is better, specifically:
 
   - **INP is real.** `web-vitals` tracks full interaction latency across every
-    event in an interaction and reports a high percentile. Ours reports the
+    event in an interaction and reports a high percentile. This one reports the
     maximum duration of a single event over 16ms. Directionally right,
     pessimistic in the tail.
   - **Back-forward cache.** A page restored from bfcache is a new page view
-    with new metrics. `web-vitals` handles the restore and re-reports; ours
+    with new metrics. `web-vitals` handles the restore and re-reports; this one
     does not, so a back-navigation is silently missed.
   - **Soft navigations.** Single-page-app route changes produce no new
     metrics here at all.
   - **Prerendering** and `activationStart` correction: not handled.
+  - **A page hidden before it painted.** `web-vitals` discards paint timings
+    reported after the page first became hidden. This one does not, so a page
+    opened in a background tab contributes an LCP nobody saw.
   - **Browser quirks.** Years of accumulated workarounds for older Safari and
-    for LCP edge cases that ours simply does not have.
+    for LCP edge cases that this one simply does not have.
 
-  Ours is correct for a normal page load on current Chrome, Firefox, and
-  Safari, and that is the claim being made.
+  It is correct for a normal page load on current Chrome, Firefox, and Safari,
+  and that is the claim being made.
+
+- **`web-vitals` (Google), the parity build** →
+  `internal/beacon/beacon.full.src.js`, served at `/b-full.js`. 2,656 bytes raw
+  and 1,415 gzipped, against 7,226 and 2,601 for `web-vitals` 4.2.4 and 12,505
+  and 4,172 for its attribution build. It closes five of the six gaps listed
+  above: real INP grouped by `interactionId` with the specification's
+  discard-one-per-fifty percentile rule, back-forward cache restores, soft
+  navigations, `activationStart` correction, and the hidden-before-paint
+  discard.
+
+  This is a second beacon rather than a replacement because the sub-1KB claim is
+  about the script a site puts on every page by default. Raising that budget to
+  fit these features would have made the claim untrue rather than optional, so
+  the two are served side by side under separate budgets.
+
+  Where theirs is still better:
+
+  - **Verification.** `web-vitals` has years of field use across every browser.
+    The parity build's server half is tested end to end, but no browser has
+    exercised its bfcache, soft-navigation, prerender, or interaction-grouping
+    paths. They are written against the specifications and reviewed, not
+    demonstrated. This is the honest gap and it is the largest one.
+  - **Soft navigation detection.** `web-vitals` can use the `soft-navigation`
+    performance entry. This wraps `history.pushState` and `history.replaceState`
+    instead, so a route change made without the History API is missed.
+  - **bfcache paint timings.** `web-vitals` re-reports properly; this
+    approximates FCP and LCP as the delay from the restore to the next frame.
+  - **Interaction retention.** Both keep the ten longest interactions, but
+    `web-vitals` handles an interaction whose latency grows after it has been
+    evicted from that set. This one does not, and can therefore under-report.
+  - **Browser quirks**, as above.
+
+- **`web-vitals/attribution`** → about 30 lines across `beacon.full.src.js` and
+  `internal/dash/report.go`: a selector built from the tag plus an id or first
+  class, plus a count of how often each selector was named in a page view rated
+  poor. 2,656 bytes against 12,505 for their attribution build.
+
+  Theirs is substantially better and it is not close. `web-vitals` reports the
+  subpart timing breakdown of an interaction, input delay against processing
+  against presentation, long-animation-frame data, the LCP resource URL with its
+  load phases, and the full shift source list. This reports which element, and
+  nothing about why. It is also not a unique path, so identical sibling elements
+  are counted as one, which is the right behaviour for an aggregate and the
+  wrong one for a page built from a single repeated component.
+
+- **`lru-cache` / `quick-lru` / `hashicorp/golang-lru`** → `recentIDs` in
+  `internal/ingest/handler.go`, a `map` alongside a fixed-size ring of keys
+  under one mutex, about 30 lines. It drops a beacon payload whose page-view
+  identifier has already been stored, which is what makes the `sendBeacon` and
+  keepalive-fetch race harmless.
+
+  Deliberately not an LRU: every key here is looked up at most twice, so recency
+  of *insertion* is the only ordering that means anything, and an LRU would keep
+  a popular key alive forever. Where a real cache library is better: eviction is
+  a plain ring rather than anything adaptive, there is no TTL, and the whole set
+  is discarded on restart. All three are fine for a window that only has to
+  outlast a burst of a few seconds, and would not be fine for a general cache.
+
+- **`history` (npm) / a router's navigation events** → wrapping
+  `history.pushState` and `history.replaceState` and listening for `popstate`,
+  eight lines in `beacon.full.src.js`. It is how a client-side route change gets
+  noticed without the beacon knowing which router the site uses. The wrapper
+  calls through first and reports second, so a router that throws fails exactly
+  as it would have unwrapped. Where the packages are better: they own the
+  navigation rather than observing it, so they see a route change made without
+  the History API, which this misses entirely.
 
 - **`terser` / `esbuild` / `uglify-js`** → hand minification. `beacon.src.js`
   is the commented source a reviewer reads; `beacon.min.js` is written by hand
-  from it. A minifier is a build-time dependency, and this project has no build
+  from it. The same arrangement, and the same cost, applies to the pair under
+  `beacon.full.*`. A minifier is a build-time dependency, and this project has no build
   step at all. The honest cost: the two files are kept in sync by a human, so
   they can drift. `beacon_test.go` asserts every metric key, entry type, and
   endpoint appears in both, and `TestMinifiedIsActuallyMinified` catches the
