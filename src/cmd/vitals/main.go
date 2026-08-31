@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -91,8 +92,8 @@ func run(addr, dataDir string, retain time.Duration, rate, burst float64) error 
 
 	errc := make(chan error, 1)
 	go func() {
-		log.Printf("dashboard  http://localhost%s/", displayAddr(addr))
-		log.Printf("demo site  http://localhost%s/demo/", displayAddr(addr))
+		log.Printf("dashboard  http://%s/", displayAddr(addr))
+		log.Printf("demo site  http://%s/demo/", displayAddr(addr))
 		log.Printf("beacon     %d bytes at %s", server.BeaconBytes(), server.BeaconPath)
 
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -132,13 +133,20 @@ func formatBytes(n int64) string {
 	}
 }
 
-// displayAddr turns a listen address into something printable in a URL.
+// displayAddr turns a listen address into the host:port half of a URL a person
+// can click. A bare port, and the wildcard hosts, become localhost, because
+// "http://0.0.0.0:8080" does not reliably open anywhere. An explicit host is
+// left alone: the operator asked to bind it and that is the address that works.
 func displayAddr(addr string) string {
-	if addr == "" {
-		return ":80"
-	}
-	if addr[0] == ':' {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		// Not a host:port at all. Print what was asked for rather than
+		// inventing an address that may not exist.
 		return addr
 	}
-	return addr
+	switch host {
+	case "", "0.0.0.0", "::", "[::]":
+		host = "localhost"
+	}
+	return net.JoinHostPort(host, port)
 }
