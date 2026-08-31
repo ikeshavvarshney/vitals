@@ -297,3 +297,139 @@ func TestHandlerConcurrent(t *testing.T) {
 		t.Errorf("stored %d records, want %d", got, n)
 	}
 }
+
+func TestHandlerStoresAttributionAndNavigationType(t *testing.T) {
+	fs := &fakeStore{}
+	h := NewHandler(fs)
+
+	post(h, `{"u":"/checkout","w":390,"i":"abc123def","n":"soft-navigation",`+
+		`"m":{"lcp":2400,"inp":312},"a":{"lcp":"img.hero","inp":"button.buy"}}`)
+
+	got := fs.all()
+	if len(got) != 1 {
+		t.Fatalf("stored %d records, want 1", len(got))
+	}
+	if got[0].Nav != "soft-navigation" {
+		t.Errorf("Nav = %q, want soft-navigation", got[0].Nav)
+	}
+	if got[0].Attr[stats.LCP] != "img.hero" {
+		t.Errorf("Attr[lcp] = %q, want img.hero", got[0].Attr[stats.LCP])
+	}
+	if got[0].Attr[stats.INP] != "button.buy" {
+		t.Errorf("Attr[inp] = %q, want button.buy", got[0].Attr[stats.INP])
+	}
+}
+
+// TestHandlerDropsDuplicatePayload covers the race the page-view identifier
+// exists for: sendBeacon and the keepalive fetch fallback both landing.
+func TestHandlerDropsDuplicatePayload(t *testing.T) {
+	fs := &fakeStore{}
+	h := NewHandler(fs)
+
+	body := `{"u":"/","i":"abc123def","m":{"lcp":1000}}`
+	first := post(h, body)
+	second := post(h, body)
+
+	// A duplicate is not an error the beacon can act on, so it is answered the
+	// same way as an accepted one.
+	if first.Code != http.StatusNoContent || second.Code != http.StatusNoContent {
+		t.Errorf("statuses = %d and %d, want %d twice", first.Code, second.Code, http.StatusNoContent)
+	}
+	if got := len(fs.all()); got != 1 {
+		t.Fatalf("stored %d records, want 1", got)
+	}
+
+	c := h.Counters()
+	if c.Accepted != 1 {
+		t.Errorf("Accepted = %d, want 1", c.Accepted)
+	}
+	if c.Duplicate != 1 {
+		t.Errorf("Duplicate = %d, want 1", c.Duplicate)
+	}
+}
+
+func TestHandlerKeepsDistinctIdentifiers(t *testing.T) {
+	fs := &fakeStore{}
+	h := NewHandler(fs)
+
+	post(h, `{"u":"/","i":"aaa111","m":{"lcp":1000}}`)
+	post(h, `{"u":"/","i":"bbb222","m":{"lcp":1100}}`)
+
+	if got := len(fs.all()); got != 2 {
+		t.Errorf("stored %d records, want 2", got)
+	}
+	if c := h.Counters(); c.Duplicate != 0 {
+		t.Errorf("Duplicate = %d, want 0", c.Duplicate)
+	}
+}
+
+// TestHandlerWithoutIdentifierIsNeverDeduplicated protects the small beacon,
+// which sends no identifier at all. Two identical payloads from it are two real
+// page views and both must be stored.
+func TestHandlerWithoutIdentifierIsNeverDeduplicated(t *testing.T) {
+	fs := &fakeStore{}
+	h := NewHandler(fs)
+
+	body := `{"u":"/","m":{"lcp":1000}}`
+	post(h, body)
+	post(h, body)
+
+	if got := len(fs.all()); got != 2 {
+		t.Errorf("stored %d records, want 2", got)
+	}
+	if c := h.Counters(); c.Duplicate != 0 {
+		t.Errorf("Duplicate = %d, want 0", c.Duplicate)
+	}
+}
+
+func TestRecentIDsEvictsOldestFirst(t *testing.T) {
+	r := newRecentIDs(2)
+
+	for _, id := range []string{"a", "b"} {
+		if !r.add(id) {
+			t.Fatalf("add(%q) = false on first insert", id)
+		}
+	}
+	if r.add("a") {
+		t.Error(`add("a") = true, want false while still remembered`)
+	}
+
+	// "c" evicts "a", the oldest, and leaves "b".
+	if !r.add("c") {
+		t.Fatal(`add("c") = false, want true`)
+	}
+	if r.add("b") {
+		t.Error(`add("b") = true, want false while still remembered`)
+	}
+	// A repeat does not insert, so the ring is unchanged and "a" is still the
+	// one that was evicted.
+	if !r.add("a") {
+		t.Error(`add("a") = false, want true after eviction`)
+	}
+}
+
+func TestRecentIDsConcurrent(t *testing.T) {
+	r := newRecentIDs(64)
+
+	const workers = 8
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	accepted := 0
+
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			if r.add("shared") {
+				mu.Lock()
+				accepted++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if accepted != 1 {
+		t.Errorf("%d goroutines saw the identifier as new, want exactly 1", accepted)
+	}
+}

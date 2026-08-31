@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -20,14 +21,39 @@ import (
 // Payload limits, enforced by the parser itself rather than by a caller.
 const (
 	// MaxBodyBytes is the largest request body accepted. A well-formed payload
-	// is under 200 bytes.
+	// is under 200 bytes from the small beacon and under 700 from the full one,
+	// which also sends an element selector per metric.
 	MaxBodyBytes = 4096
 	// MaxRouteBytes caps the stored route. Longer routes are truncated, not
 	// rejected: a long URL is a real page, not an attack.
 	MaxRouteBytes = 512
+	// MaxIDBytes caps the page-view identifier. The beacon generates 13 or 14
+	// characters; anything longer than this is not from the beacon.
+	MaxIDBytes = 32
+	// MaxAttributionBytes caps a stored element selector. Longer values are
+	// truncated rather than rejected: a real page can have a very long class
+	// name, and the prefix still names the element.
+	MaxAttributionBytes = 128
 	// maxMetrics bounds map growth from a body full of unknown keys.
 	maxMetrics = 32
+	// maxAttributes bounds the attribution object the same way.
+	maxAttributes = 8
 )
+
+// navigationTypes is the closed set of navigation types accepted. The first
+// four come from the browser's navigation entry; the last two are the full
+// beacon's own labels for a page view that no navigation entry describes.
+//
+// The value is rendered on the dashboard, so it is matched against this set
+// rather than sanitised: an unknown value is dropped, never displayed.
+var navigationTypes = map[string]bool{
+	"navigate":           true,
+	"reload":             true,
+	"back_forward":       true,
+	"prerender":          true,
+	"back-forward-cache": true,
+	"soft-navigation":    true,
+}
 
 // Parse errors, deliberately coarse: the endpoint answers 204 either way and
 // the counters only distinguish malformed from oversized.
@@ -47,6 +73,16 @@ type Payload struct {
 	At int64
 	// Width is the viewport width in CSS pixels, or 0 if not sent.
 	Width int
+	// ID is the beacon's per-page-view identifier, or empty if not sent. It
+	// exists so a payload delivered twice is stored once; it is not a visitor
+	// identifier and does not persist across page views.
+	ID string
+	// Nav is how the page view began: one of [navigationTypes], or empty when
+	// the beacon sent nothing or sent something unrecognised.
+	Nav string
+	// Attribution names the element responsible for a metric, keyed by the same
+	// metric. Only the full beacon sends it, and only for LCP, CLS, and INP.
+	Attribution map[stats.Metric]string
 	// Values holds metrics already filtered to known keys with finite,
 	// non-negative, in-range values.
 	Values map[stats.Metric]float64
@@ -98,6 +134,27 @@ func Parse(body []byte) (Payload, error) {
 			}
 			if n > 0 && n < 65536 {
 				out.Width = int(n)
+			}
+		case "i":
+			s, err := p.stringValue()
+			if err != nil {
+				return err
+			}
+			out.ID = sanitizeID(s)
+		case "n":
+			s, err := p.stringValue()
+			if err != nil {
+				return err
+			}
+			if navigationTypes[s] {
+				out.Nav = s
+			}
+		case "a":
+			if out.Attribution == nil {
+				out.Attribution = make(map[stats.Metric]string, maxAttributes)
+			}
+			if err := p.attribution(out.Attribution); err != nil {
+				return err
 			}
 		case "m":
 			if err := p.metrics(out.Values); err != nil {
@@ -153,6 +210,91 @@ func (p *parser) metrics(dst map[stats.Metric]float64) error {
 		dst[m] = v
 		return nil
 	})
+}
+
+// attribution parses the "a" object into dst, keeping only known metric keys
+// with a non-empty sanitized value.
+func (p *parser) attribution(dst map[stats.Metric]string) error {
+	p.skipSpace()
+	if !p.consume('{') {
+		return ErrMalformed
+	}
+
+	seen := 0
+	return p.object(func(key string) error {
+		seen++
+		if seen > maxAttributes {
+			return ErrMalformed
+		}
+		// Read as a string rather than skipping unknown keys generically: a
+		// number or null here means the payload did not come from the beacon,
+		// and pretending otherwise would hide a client bug.
+		v, err := p.stringValue()
+		if err != nil {
+			return err
+		}
+
+		m := stats.Metric(key)
+		if !stats.Valid(m) {
+			return nil // unknown metric, dropped
+		}
+		if v := sanitizeAttribution(v); v != "" {
+			dst[m] = v
+		}
+		return nil
+	})
+}
+
+// sanitizeID keeps the identifier only if it looks like one the beacon
+// generated: lowercase base-36, within the length cap. Anything else is
+// discarded rather than cleaned, because the value is only ever compared for
+// equality and a rejected one costs nothing but a duplicate that would have
+// been dropped.
+func sanitizeID(s string) string {
+	if s == "" || len(s) > MaxIDBytes {
+		return ""
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'z') {
+			return ""
+		}
+	}
+	return s
+}
+
+// sanitizeAttribution makes an element selector safe to store and to render.
+//
+// The value is a string chosen by the page, so it is the one field of the
+// payload a hostile client fully controls. Control characters are removed so it
+// cannot forge a line in the log or a frame on the event stream, invalid UTF-8
+// is replaced so it survives JSON encoding, and the length is capped. Angle
+// brackets are deliberately kept: the dashboard escapes what it renders, and
+// silently mangling a selector would make a real one unrecognisable.
+func sanitizeAttribution(s string) string {
+	var b []byte
+	for _, r := range s {
+		switch {
+		case r == utf8.RuneError:
+			// Either an invalid byte or a literal U+FFFD; both encode the same.
+			b = utf8.AppendRune(b, utf8.RuneError)
+		case r < 0x20 || r == 0x7f:
+			// Control characters, including the newline that separates records
+			// in the log and the frames on the event stream.
+		default:
+			b = utf8.AppendRune(b, r)
+		}
+	}
+
+	out := strings.TrimSpace(string(b))
+	if len(out) > MaxAttributionBytes {
+		out = out[:MaxAttributionBytes]
+		// The cut can land mid-rune.
+		for len(out) > 0 && !utf8.ValidString(out) {
+			out = out[:len(out)-1]
+		}
+	}
+	return out
 }
 
 // sanitizeRoute strips a query string and fragment, enforces a leading slash,

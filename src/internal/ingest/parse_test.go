@@ -396,3 +396,208 @@ func FuzzParse(f *testing.F) {
 		}
 	})
 }
+
+// TestParseFullBeaconPayload covers the shape the full beacon sends: the three
+// fields the small beacon does not set.
+func TestParseFullBeaconPayload(t *testing.T) {
+	body := `{"u":"/checkout","t":1756500000000,"w":390,"i":"k3f9a1b2mfz7q","n":"soft-navigation",` +
+		`"m":{"lcp":2400,"cls":0.21,"inp":312},` +
+		`"a":{"lcp":"img.hero","cls":"div#promo","inp":"button.add-to-cart"}}`
+
+	got, err := Parse([]byte(body))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	if got.ID != "k3f9a1b2mfz7q" {
+		t.Errorf("ID = %q, want %q", got.ID, "k3f9a1b2mfz7q")
+	}
+	if got.Nav != "soft-navigation" {
+		t.Errorf("Nav = %q, want %q", got.Nav, "soft-navigation")
+	}
+
+	want := map[stats.Metric]string{
+		stats.LCP: "img.hero",
+		stats.CLS: "div#promo",
+		stats.INP: "button.add-to-cart",
+	}
+	if len(got.Attribution) != len(want) {
+		t.Fatalf("got %d attributions, want %d: %v", len(got.Attribution), len(want), got.Attribution)
+	}
+	for m, v := range want {
+		if got.Attribution[m] != v {
+			t.Errorf("Attribution[%s] = %q, want %q", m, got.Attribution[m], v)
+		}
+	}
+}
+
+// TestParseSmallBeaconPayloadHasNoExtras confirms the fields are optional: the
+// 942-byte beacon sends none of them and must keep parsing.
+func TestParseSmallBeaconPayloadHasNoExtras(t *testing.T) {
+	got, err := Parse([]byte(`{"u":"/","t":1,"w":800,"m":{"lcp":1000}}`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got.ID != "" {
+		t.Errorf("ID = %q, want empty", got.ID)
+	}
+	if got.Nav != "" {
+		t.Errorf("Nav = %q, want empty", got.Nav)
+	}
+	if len(got.Attribution) != 0 {
+		t.Errorf("Attribution = %v, want empty", got.Attribution)
+	}
+}
+
+func TestParseNavigationType(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"navigate", "navigate", "navigate"},
+		{"reload", "reload", "reload"},
+		{"browser back forward", "back_forward", "back_forward"},
+		{"prerender", "prerender", "prerender"},
+		{"bfcache restore", "back-forward-cache", "back-forward-cache"},
+		{"soft navigation", "soft-navigation", "soft-navigation"},
+		{"unknown is dropped", "teleport", ""},
+		{"empty is dropped", "", ""},
+		{"markup is dropped", "<script>", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `{"u":"/","m":{"lcp":1},"n":"` + tt.in + `"}`
+			got, err := Parse([]byte(body))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if got.Nav != tt.want {
+				t.Errorf("Nav = %q, want %q", got.Nav, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseIDIsRestricted(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"beacon shape", "abcd1234efgh", "abcd1234efgh"},
+		{"digits only", "0123456789", "0123456789"},
+		{"uppercase is dropped", "ABCdef", ""},
+		{"punctuation is dropped", "abc-def", ""},
+		{"path traversal is dropped", "../../etc", ""},
+		{"empty is dropped", "", ""},
+		{"over the length cap is dropped", strings.Repeat("a", MaxIDBytes+1), ""},
+		{"at the length cap is kept", strings.Repeat("a", MaxIDBytes), strings.Repeat("a", MaxIDBytes)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `{"u":"/","m":{"lcp":1},"i":"` + tt.in + `"}`
+			got, err := Parse([]byte(body))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if got.ID != tt.want {
+				t.Errorf("ID = %q, want %q", got.ID, tt.want)
+			}
+		})
+	}
+}
+
+// TestSanitizeAttribution is the table that matters most here: an attribution
+// value is the only free-form string from a page that the dashboard renders,
+// so it is the one field a hostile payload would aim at.
+func TestSanitizeAttribution(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain selector", "img.hero-banner", "img.hero-banner"},
+		{"id selector", "div#promo-slot", "div#promo-slot"},
+		{"tag alone", "button", "button"},
+		{"empty stays empty", "", ""},
+		{"whitespace is trimmed", "  img.hero  ", "img.hero"},
+		{"newline is dropped", "img\n.hero", "img.hero"},
+		{"tab is dropped", "img\t.hero", "img.hero"},
+		{"null byte is dropped", "img\x00.hero", "img.hero"},
+		{"angle brackets survive as text", "<script>", "<script>"},
+		{"invalid utf8 is replaced", "img.\xff\xfehero", "img.\uFFFD\uFFFDhero"},
+		{
+			"over the cap is truncated",
+			strings.Repeat("a", MaxAttributionBytes+50),
+			strings.Repeat("a", MaxAttributionBytes),
+		},
+		{
+			"truncation keeps valid utf8",
+			strings.Repeat("a", MaxAttributionBytes-1) + "\u00e9",
+			strings.Repeat("a", MaxAttributionBytes-1),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeAttribution(tt.in); got != tt.want {
+				t.Errorf("sanitizeAttribution(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseAttributionFiltersKeys(t *testing.T) {
+	body := `{"u":"/","m":{"lcp":1},"a":{"lcp":"img.hero","bogus":"x","cls":"","inp":"button"}}`
+
+	got, err := Parse([]byte(body))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	if got.Attribution[stats.LCP] != "img.hero" {
+		t.Errorf("Attribution[lcp] = %q, want %q", got.Attribution[stats.LCP], "img.hero")
+	}
+	if got.Attribution[stats.INP] != "button" {
+		t.Errorf("Attribution[inp] = %q, want %q", got.Attribution[stats.INP], "button")
+	}
+	if _, ok := got.Attribution[stats.CLS]; ok {
+		t.Error("an empty attribution value was stored; it should be dropped")
+	}
+	if len(got.Attribution) != 2 {
+		t.Errorf("got %d attributions, want 2: %v", len(got.Attribution), got.Attribution)
+	}
+}
+
+func TestParseAttributionRejectsNonStrings(t *testing.T) {
+	for _, body := range []string{
+		`{"u":"/","m":{"lcp":1},"a":{"lcp":42}}`,
+		`{"u":"/","m":{"lcp":1},"a":{"lcp":null}}`,
+		`{"u":"/","m":{"lcp":1},"a":["img"]}`,
+	} {
+		if _, err := Parse([]byte(body)); !errors.Is(err, ErrMalformed) {
+			t.Errorf("Parse(%s) error = %v, want ErrMalformed", body, err)
+		}
+	}
+}
+
+func TestParseTooManyAttributionKeys(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(`{"u":"/","m":{"lcp":1},"a":{`)
+	for i := 0; i < maxAttributes+1; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(`"k`)
+		b.WriteString(string(rune('a' + i)))
+		b.WriteString(`":"v"`)
+	}
+	b.WriteString(`}}`)
+
+	if _, err := Parse([]byte(b.String())); !errors.Is(err, ErrMalformed) {
+		t.Errorf("error = %v, want ErrMalformed for more than %d attribution keys", err, maxAttributes)
+	}
+}

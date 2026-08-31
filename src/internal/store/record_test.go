@@ -2,6 +2,7 @@ package store
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -177,5 +178,90 @@ func TestDevice(t *testing.T) {
 		if got := r.Device(); got != tt.want {
 			t.Errorf("width %d: Device() = %v, want %v", tt.width, got, tt.want)
 		}
+	}
+}
+
+// TestRecordRoundTripWithAttribution covers the fields the full beacon adds.
+func TestRecordRoundTripWithAttribution(t *testing.T) {
+	want := Record{
+		At:      time.UnixMilli(1756500000000).UTC(),
+		Route:   "/checkout",
+		Session: "a1b2c3d4",
+		Width:   390,
+		Nav:     "soft-navigation",
+		Attr: map[stats.Metric]string{
+			stats.LCP: "img.hero",
+			stats.CLS: "div#promo",
+			stats.INP: "button.add-to-cart",
+		},
+		Values: map[stats.Metric]float64{stats.LCP: 2400, stats.CLS: 0.21, stats.INP: 312},
+	}
+
+	line, err := want.MarshalLine()
+	if err != nil {
+		t.Fatalf("MarshalLine: %v", err)
+	}
+	got, err := UnmarshalLine(line)
+	if err != nil {
+		t.Fatalf("UnmarshalLine: %v", err)
+	}
+
+	if got.Nav != want.Nav {
+		t.Errorf("Nav = %q, want %q", got.Nav, want.Nav)
+	}
+	if len(got.Attr) != len(want.Attr) {
+		t.Fatalf("got %d attributions, want %d: %v", len(got.Attr), len(want.Attr), got.Attr)
+	}
+	for m, v := range want.Attr {
+		if got.Attr[m] != v {
+			t.Errorf("Attr[%s] = %q, want %q", m, got.Attr[m], v)
+		}
+	}
+}
+
+// TestMarshalOmitsEmptyAttribution keeps the log small for the small beacon,
+// which reports no attribution at all: an empty object on every line would be
+// pure overhead in a file that is replayed in full on every restart.
+func TestMarshalOmitsEmptyAttribution(t *testing.T) {
+	tests := []struct {
+		name string
+		rec  Record
+	}{
+		{"nil map", Record{At: time.UnixMilli(1), Route: "/", Values: map[stats.Metric]float64{stats.LCP: 1}}},
+		{"empty map", Record{At: time.UnixMilli(1), Route: "/", Attr: map[stats.Metric]string{}, Values: map[stats.Metric]float64{stats.LCP: 1}}},
+		{"only empty values", Record{At: time.UnixMilli(1), Route: "/", Attr: map[stats.Metric]string{stats.LCP: ""}, Values: map[stats.Metric]float64{stats.LCP: 1}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			line, err := tt.rec.MarshalLine()
+			if err != nil {
+				t.Fatalf("MarshalLine: %v", err)
+			}
+			if strings.Contains(string(line), `"a"`) {
+				t.Errorf("line carries an attribution object: %s", line)
+			}
+			if strings.Contains(string(line), `"n"`) {
+				t.Errorf("line carries a navigation type it was not given: %s", line)
+			}
+		})
+	}
+}
+
+func TestUnmarshalDropsUnknownAttributionKeys(t *testing.T) {
+	line := []byte(`{"t":1756500000000,"u":"/","n":"reload","a":{"lcp":"img","bogus":"x","cls":""},"m":{"lcp":1}}`)
+
+	got, err := UnmarshalLine(line)
+	if err != nil {
+		t.Fatalf("UnmarshalLine: %v", err)
+	}
+	if got.Attr[stats.LCP] != "img" {
+		t.Errorf("Attr[lcp] = %q, want %q", got.Attr[stats.LCP], "img")
+	}
+	if len(got.Attr) != 1 {
+		t.Errorf("got %d attributions, want 1: %v", len(got.Attr), got.Attr)
+	}
+	if got.Nav != "reload" {
+		t.Errorf("Nav = %q, want %q", got.Nav, "reload")
 	}
 }

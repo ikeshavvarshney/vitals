@@ -27,6 +27,16 @@ type Record struct {
 	Session string
 	// Width is the viewport width in CSS pixels, used to derive a device class.
 	Width int
+	// Nav is how the page view began: a browser navigation type, or the full
+	// beacon's label for a back-forward cache restore or a soft navigation.
+	// Empty when the beacon did not report one, which is every record the
+	// small beacon writes.
+	Nav string
+	// Attr names the element responsible for a metric, keyed by that metric.
+	// Only the full beacon reports it, and only for LCP, CLS, and INP. An
+	// absent entry means the beacon could not name an element, not that no
+	// element was involved.
+	Attr map[stats.Metric]string
 	// Values holds the measured metrics. An absent metric was not reported,
 	// which is not the same as being reported as zero.
 	Values map[stats.Metric]float64
@@ -39,6 +49,8 @@ type wireRecord struct {
 	U string             `json:"u"`           // route
 	S string             `json:"s,omitempty"` // session
 	W int                `json:"w,omitempty"` // viewport width
+	N string             `json:"n,omitempty"` // navigation type
+	A map[string]string  `json:"a,omitempty"` // element attribution, by metric
 	M map[string]float64 `json:"m"`           // metric values
 }
 
@@ -49,10 +61,23 @@ func (r Record) MarshalLine() ([]byte, error) {
 		U: r.Route,
 		S: r.Session,
 		W: r.Width,
+		N: r.Nav,
 		M: make(map[string]float64, len(r.Values)),
 	}
 	for m, v := range r.Values {
 		w.M[string(m)] = v
+	}
+	// Written only when there is something to write: the small beacon reports
+	// no attribution at all, and an empty object on every one of its lines
+	// would be pure overhead in the log.
+	for m, v := range r.Attr {
+		if v == "" {
+			continue
+		}
+		if w.A == nil {
+			w.A = make(map[string]string, len(r.Attr))
+		}
+		w.A[string(m)] = v
 	}
 
 	b, err := json.Marshal(w)
@@ -79,7 +104,18 @@ func UnmarshalLine(line []byte) (Record, error) {
 		Route:   w.U,
 		Session: w.S,
 		Width:   w.W,
+		Nav:     w.N,
 		Values:  make(map[stats.Metric]float64, len(w.M)),
+	}
+	for k, v := range w.A {
+		m := stats.Metric(k)
+		if !stats.Valid(m) || v == "" {
+			continue
+		}
+		if r.Attr == nil {
+			r.Attr = make(map[stats.Metric]string, len(w.A))
+		}
+		r.Attr[m] = v
 	}
 	for k, v := range w.M {
 		m := stats.Metric(k)
