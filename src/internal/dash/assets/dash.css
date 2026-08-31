@@ -475,6 +475,95 @@ td.num {
   white-space: nowrap;
   font-weight: 600;
 }
+/* Visitor journeys. One row per visitor, their page views left to right, each
+   coloured by its worst metric. The strip scrolls inside its own row rather
+   than widening the page, so a visitor with twenty steps does not push the
+   layout sideways. */
+.journeys { padding: 0.25rem 0; }
+
+.journey {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+.journey:last-child { border-bottom: 0; }
+
+.journey-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+.journey-id {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--ink);
+  font-weight: 600;
+}
+.journey-meta { font-size: 0.78rem; color: var(--ink-3); }
+.journey-flag {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  background: var(--poor-bg);
+  color: var(--poor);
+  font-weight: 600;
+}
+
+.journey-steps {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0.25rem 0;
+}
+
+.journey-step {
+  flex: 0 0 auto;
+  min-width: 7.5rem;
+  max-width: 12rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  /* Colour is never the only signal: the band is in the hover text and the
+     figure inside the box carries the metric that set it. */
+  border-left-width: 3px;
+}
+.journey-step.good { border-left-color: var(--good); }
+.journey-step.needs-improvement { border-left-color: var(--needs); }
+.journey-step.poor { border-left-color: var(--poor); }
+.journey-step.none { border-left-color: var(--line); }
+.journey-step.more {
+  display: flex;
+  align-items: center;
+  min-width: 4.5rem;
+  color: var(--ink-3);
+  font-size: 0.75rem;
+  border-left-color: var(--line);
+}
+
+.journey-route {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.journey-figure {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-3);
+  margin-top: 0.15rem;
+}
+
+.journeys-note { margin-top: 0.5rem; }
+
 /* The blamed-element column. A selector can be long, so it wraps rather than
    widening the table past the viewport, and the count of poor page views is
    coloured only when it is not zero. */

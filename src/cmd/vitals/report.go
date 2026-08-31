@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"vitals/src/internal/stats"
 	"vitals/src/server"
 )
 
@@ -109,6 +110,7 @@ func printReport(out io.Writer, rep server.Report) {
 	// Attribution, when the full beacon is the one reporting. The slowest route
 	// says where to look; this says what to look at.
 	printOffenders(out, rep)
+	printJourneys(out, rep)
 	printNavigation(out, rep)
 
 	if c := rep.Coverage; c != nil {
@@ -144,6 +146,75 @@ func printOffenders(out io.Writer, rep server.Report) {
 		o := m.Offenders[0]
 		fmt.Fprintf(out, "  %-6s %-40s named %d time(s), %d rated poor\n",
 			strings.ToUpper(string(m.Metric)), truncate(o.Selector, 40), o.Samples, o.Poor)
+	}
+}
+
+// printJourneys prints the worst individual visitor experiences.
+//
+// This is the part of the report a percentile cannot produce. A p75 says a
+// route is slow; a journey says one visitor loaded three pages in a row and
+// every one of them was worse than the last, which is a specific thing to go
+// and reproduce.
+func printJourneys(out io.Writer, rep server.Report) {
+	if len(rep.Journeys) == 0 {
+		return
+	}
+
+	fmt.Fprintf(out, "\nWorst visitor journeys  (%d distinct visitor(s) in this window)\n", rep.Visitors)
+
+	for _, j := range rep.Journeys {
+		note := ""
+		if j.Degraded {
+			note = ", got worse as it went"
+		}
+		fmt.Fprintf(out, "  %s  %d page view(s) over %s, worst %s%s\n",
+			j.Session, j.PageViews, duration(j.DurationSeconds), j.Worst, note)
+
+		for _, step := range j.Steps {
+			fmt.Fprintf(out, "      %s  %-34s %-18s %s\n",
+				step.At.Format("15:04:05"), truncate(step.Route, 34),
+				stepFigures(step), step.Worst)
+		}
+		if j.Truncated {
+			fmt.Fprintln(out, "      (earlier steps only; the rest were not listed)")
+		}
+	}
+}
+
+// stepFigures renders the metrics of one step in a fixed order, so the columns
+// line up between steps that reported different sets.
+func stepFigures(step server.Step) string {
+	var b strings.Builder
+	for _, m := range []stats.Metric{stats.LCP, stats.INP, stats.CLS} {
+		v, ok := step.Values[m]
+		if !ok {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		fmt.Fprintf(&b, "%s %s", strings.ToUpper(string(m)), value(v, unitFor(m)))
+	}
+	return b.String()
+}
+
+// unitFor returns the unit string the value formatter expects for a metric.
+func unitFor(m stats.Metric) string {
+	if m == stats.CLS {
+		return ""
+	}
+	return "ms"
+}
+
+// duration renders a journey length in whole seconds or minutes.
+func duration(seconds float64) string {
+	switch {
+	case seconds < 1:
+		return "under a second"
+	case seconds < 90:
+		return fmt.Sprintf("%.0fs", seconds)
+	default:
+		return fmt.Sprintf("%.0fm", seconds/60)
 	}
 }
 

@@ -106,9 +106,17 @@ type Report struct {
 	Ingest      ingest.Counters `json:"ingest"`
 	// Navigation is how the page views in this window began, most common
 	// first. Empty when no record carried a navigation type.
-	Navigation  []NavigationCount `json:"navigation"`
-	Coverage    *coverageSummary  `json:"coverage"`
-	BeaconBytes int               `json:"beaconBytes"`
+	Navigation []NavigationCount `json:"navigation"`
+	// Visitors is the number of distinct visitors in the window. A visitor
+	// identifier rotates daily, so this counts visitors per day rather than
+	// people over time.
+	Visitors int `json:"visitors"`
+	// Journeys is a handful of the worst individual visitor experiences, worst
+	// first. A percentile says a route is slow; a journey says one person hit
+	// three slow pages in a row, which is a different and more actionable fact.
+	Journeys    []Journey        `json:"journeys"`
+	Coverage    *coverageSummary `json:"coverage"`
+	BeaconBytes int              `json:"beaconBytes"`
 	// Caveats travel with the numbers. A report pasted somewhere else loses the
 	// footnotes printed on the dashboard, and these approximations are not safe
 	// to read without them.
@@ -201,10 +209,35 @@ func (a *API) report(q query) Report {
 		Metrics:     agg.metrics(q.Percentile),
 		Ingest:      a.counters(),
 		Navigation:  agg.navigation(),
+		Visitors:    a.store.SessionCount(q.Range),
+		Journeys:    a.worstJourneys(q),
 		Coverage:    a.coverage(),
 		BeaconBytes: beacon.Size(),
 		Caveats:     reportCaveats,
 	}
+}
+
+// reportJourneys is how many visitor journeys a report carries. The report is
+// meant to be read in one screen, so it spends its space on the worst few
+// rather than listing everyone.
+const reportJourneys = 3
+
+// worstJourneys returns the least pleasant visitor experiences in the window.
+//
+// It samples a wider set than it returns and then ranks, because the store
+// orders visitors by recency and the most recent visitor is not usually the
+// worst-served one.
+func (a *API) worstJourneys(q query) []Journey {
+	journeys := a.journeys(q, maxJourneys).Journeys
+	if len(journeys) == 0 {
+		return nil
+	}
+
+	sortJourneysWorstFirst(journeys)
+	if len(journeys) > reportJourneys {
+		journeys = journeys[:reportJourneys]
+	}
+	return journeys
 }
 
 // reportAggregator accumulates one pass over the store into every figure the

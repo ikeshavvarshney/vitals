@@ -57,6 +57,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/routes", a.handleRoutes)
 	mux.HandleFunc("GET /api/devices", a.handleDevices)
 	mux.HandleFunc("GET /api/report", a.handleReport)
+	mux.HandleFunc("GET /api/journeys", a.handleJourneys)
 	mux.HandleFunc("GET /api/events", a.handleEvents)
 }
 

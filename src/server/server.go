@@ -135,6 +135,12 @@ type ReportOptions = dash.ReportOptions
 // Report is the full measurement document for a window.
 type Report = dash.Report
 
+// Journey is one visitor's sequence of page views, as carried by a [Report].
+type Journey = dash.Journey
+
+// Step is one page view inside a [Journey].
+type Step = dash.Step
+
 // Report builds the same document GET /api/report returns, without going
 // through HTTP. The terminal report uses it.
 func (s *Server) Report(opts ReportOptions) (Report, error) { return s.api.BuildReport(opts) }

@@ -18,6 +18,9 @@
     routes: document.getElementById('routes'),
     devices: document.getElementById('devices'),
     counters: document.getElementById('counters'),
+    journeys: document.getElementById('journeys'),
+    journeysSub: document.getElementById('journeys-sub'),
+    journeysPrivacy: document.getElementById('journeys-privacy'),
     blame: document.getElementById('blame'),
     navigation: document.getElementById('navigation'),
     storage: document.getElementById('storage'),
@@ -558,6 +561,114 @@
     table.appendChild(body);
   }
 
+  // --------------------------------------------------------------- journeys
+
+  // renderJourneys draws one row per visitor: their page views left to right,
+  // each coloured by its worst metric, so a visit that got steadily worse reads
+  // as a colour gradient rather than as a table to be compared by hand.
+  //
+  // This is the one view here that follows a person rather than an aggregate.
+  // The identifier it shows rotates daily and is never a cookie; the note under
+  // the panel is served with the data rather than written into the page, so the
+  // disclosure travels with the API response.
+  function renderJourneys(data) {
+    clear(el.journeys);
+    el.journeysPrivacy.textContent = data.note || '';
+
+    var visitors = data.visitors === 1 ? '1 visitor' : data.visitors.toLocaleString() + ' visitors';
+    el.journeysSub.textContent = 'What one person actually hit, in order. ' +
+      visitors + ' in this window' +
+      (data.journeys.length < data.visitors ? ', showing the ' + data.journeys.length + ' most recent' : '') +
+      '.';
+
+    if (!data.journeys.length) {
+      el.journeys.appendChild(h('p', {
+        class: 'empty',
+        text: 'No visitors in this window.'
+      }));
+      return;
+    }
+
+    data.journeys.forEach(function (j) {
+      var head = [
+        h('span', { class: 'journey-id', text: j.session }),
+        h('span', {
+          class: 'journey-meta',
+          text: j.pageViews + (j.pageViews === 1 ? ' page view' : ' page views') +
+            (j.durationSeconds >= 1 ? ' over ' + formatDuration(j.durationSeconds) : '')
+        })
+      ];
+      if (j.degraded) {
+        head.push(h('span', {
+          class: 'journey-flag',
+          title: 'The last page view was rated worse than the first',
+          text: 'got worse'
+        }));
+      }
+
+      var steps = h('ol', { class: 'journey-steps' });
+      j.steps.forEach(function (step) {
+        steps.appendChild(h('li', {
+          class: 'journey-step ' + (step.worst || 'none'),
+          title: stepTitle(step)
+        }, [
+          h('span', { class: 'journey-route', text: step.route }),
+          h('span', { class: 'journey-figure', text: stepHeadline(step) })
+        ]));
+      });
+
+      if (j.truncated) {
+        steps.appendChild(h('li', {
+          class: 'journey-step more',
+          text: '+' + (j.pageViews - j.steps.length) + ' more'
+        }));
+      }
+
+      el.journeys.appendChild(h('div', { class: 'journey' }, [
+        h('div', { class: 'journey-head' }, head),
+        steps
+      ]));
+    });
+  }
+
+  // stepHeadline picks the one figure worth showing inside a step box: the
+  // worst-rated metric, because that is what decided the step's colour.
+  function stepHeadline(step) {
+    var worstKey = null;
+    METRICS.forEach(function (m) {
+      if (step.bands[m.key] === step.worst && worstKey === null) worstKey = m.key;
+    });
+    if (worstKey === null) return '';
+
+    var unit = worstKey === 'cls' ? '' : 'ms';
+    var v = step.values[worstKey];
+    return m0(worstKey) + ' ' + formatValue(v, unit) + unitLabel(v, unit);
+  }
+
+  // m0 returns a metric's short label.
+  function m0(key) {
+    return (metricByKey[key] || { label: key }).label;
+  }
+
+  // stepTitle is the hover text: every metric this page view reported.
+  function stepTitle(step) {
+    var parts = [step.route, formatClock(step.t)];
+    METRICS.forEach(function (m) {
+      if (!(m.key in step.values)) return;
+      var unit = m.key === 'cls' ? '' : 'ms';
+      parts.push(m.label + ' ' + formatValue(step.values[m.key], unit) +
+        unitLabel(step.values[m.key], unit) + ' (' + step.bands[m.key] + ')');
+    });
+    if (step.nav) parts.push(step.nav.replace(/[-_]/g, ' '));
+    parts.push(step.device);
+    return parts.join(' | ');
+  }
+
+  function formatDuration(seconds) {
+    if (seconds < 90) return Math.round(seconds) + 's';
+    return Math.round(seconds / 60) + 'm';
+  }
+
   // ------------------------------------------------------------ attribution
 
   // renderBlame lists the element each metric was blamed on, from the report
@@ -1043,7 +1154,8 @@
       // fifth request rather than a sixth field on the summary because it is
       // the same document the export already builds, so there is one place
       // where a metric's offenders are computed.
-      fetchReport()
+      fetchReport(),
+      getJSON('/api/journeys?' + q)
     ]).then(function (r) {
       renderScorecard(r[0]);
       renderCounters(r[0]);
@@ -1055,6 +1167,7 @@
       renderTable(el.routes, r[2], 'Route', 'No routes reported in this window.', setRoute);
       renderTable(el.devices, r[3], 'Device', 'No devices reported in this window.');
       renderBlame(r[4]);
+      renderJourneys(r[5]);
 
       var total = r[0].samples;
       setStatus(total.toLocaleString() + (total === 1 ? ' page view' : ' page views'));
