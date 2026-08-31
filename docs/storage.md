@@ -216,8 +216,8 @@ arrivals rebuild the route index, which is acceptable because they are rare.
 
 Stated explicitly, as these are the questions a reviewer should ask.
 
-- **No compaction, no retention, no deletion.** `data/` grows forever until an
-  operator prunes it.
+- **No compaction.** Day logs are never rewritten or merged. Retention deletes
+  whole files; without `-retain`, `data/` grows forever.
 - **Memory grows with total records.** Everything ever recorded is held in RAM.
   The tool scales to one machine and no further.
 - **One writer only.** Two processes sharing a data directory will corrupt the
@@ -225,9 +225,30 @@ Stated explicitly, as these are the questions a reviewer should ask.
 - **No indexes beyond route.** A device-class or session query scans the range.
 - **No transactions, no crash-consistent guarantees** beyond skipping a
   truncated line.
-- **No query planner and no query language.** The API exposes four fixed shapes.
+- **No query planner and no query language.** The API exposes five fixed shapes.
+- **JSONL rather than a binary segment format.** This was planned and cut on
+  purpose; see below.
 
 At the scale this tool targets, one site and thousands of page views a day, an
 append log plus a sorted slice is the correct engineering answer rather than a
 compromise. It would not survive being pointed at a large site, and it is not
 intended to.
+
+### The binary segment format that is not here
+
+The design called for compacting sealed day logs into a hand-written binary
+format: a fixed record layout, a magic header, and a CRC per segment, with the
+reader accepting both formats so old data stayed readable. That would have
+removed `encoding/json` from the write path entirely and cut the per-record
+cost by roughly half.
+
+It was cut deliberately, ahead of the deadline rather than discovered missing at
+it. A new on-disk format is the one change in this project capable of losing
+data silently, and shipping one without time to exercise it against truncation,
+partial writes, and mixed-format replay would trade a durability story that is
+tested for one that is merely written.
+
+The measured cost of not doing it is about 150 bytes per record instead of an
+estimated 40 to 60, and a JSON parse per record at startup rather than a
+fixed-width read. The dashboard reports the real figure from the files, so the
+size of the tradeoff is visible rather than asserted.

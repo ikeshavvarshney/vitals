@@ -158,12 +158,21 @@ the repo.
 make repro
 ```
 
-Builds twice and prints both hashes.
+Builds twice and prints both hashes. From the CI run for commit `fe99284`,
+Go 1.23.12, `linux/amd64`:
 
 ```
-SHA-256 (build 1): [see the ci run for this commit]
-SHA-256 (build 2): [see the ci run for this commit]
+SHA-256 (build 1): d9ca445792027b83c9f24970902e607254fdcfadca933d023d71cb0792964c11
+SHA-256 (build 2): d9ca445792027b83c9f24970902e607254fdcfadca933d023d71cb0792964c11
 ```
+
+Because `-buildvcs=false` keeps the commit out of the binary, that digest holds
+for any commit with the same Go source and embedded assets: a change to the
+documentation does not alter it. A different Go version, a different
+`GOOS`/`GOARCH`, or any change to the code produces a different and equally
+valid digest, so the pair above is a claim about one build configuration rather
+than a universal fingerprint. The run that produced it is linked from the
+`reproducible-build` job of that commit.
 
 Built with:
 
@@ -279,6 +288,27 @@ which is invisible in practice because a notification only means "re-read".
 no compaction, no query planner. At the scale this targets (one site), that is
 the right answer, not a compromise. It would not survive being pointed at a large
 site.
+
+**The binary segment format was planned and deliberately cut.** The design
+called for compacting old day logs into a hand-written binary format with a
+fixed record layout and a CRC per segment, replacing JSONL on disk and removing
+`encoding/json` from the write path. It is not here. Cutting it was a decision
+made in advance rather than an omission discovered at the end: a new on-disk
+format is the one change in this project that can silently lose data, and it
+would have landed without time to soak.
+
+What that costs: a record occupies about 150 bytes as JSONL, which is measured
+from this project's own data directory and reported live in the dashboard's
+storage panel. A packed binary record carrying the same fields would be roughly
+40 to 60 bytes, which is an estimate rather than a measurement because the
+format was never built. Call it two to three times larger than it needs to be,
+plus a JSON parse per record on every restart instead of a fixed-width read.
+
+What it buys: the on-disk format is a text file you can `tail`, `grep`, and
+repair by hand, a corrupt line costs one measurement rather than a whole
+segment, and the durability behaviour is the one already exercised by tests
+rather than newly written code. Retention takes the same shape for the same
+reason: whole day files expire, and no file is ever rewritten in place.
 
 **Secure context.** Some `PerformanceObserver` entry types and `sendBeacon`
 behave differently on insecure origins. `localhost` counts as secure, so the
