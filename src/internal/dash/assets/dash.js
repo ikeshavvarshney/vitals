@@ -18,6 +18,8 @@
     routes: document.getElementById('routes'),
     devices: document.getElementById('devices'),
     counters: document.getElementById('counters'),
+    blame: document.getElementById('blame'),
+    navigation: document.getElementById('navigation'),
     storage: document.getElementById('storage'),
     windowSel: document.getElementById('window'),
     metricGroup: document.getElementById('metric-group'),
@@ -556,6 +558,79 @@
     table.appendChild(body);
   }
 
+  // ------------------------------------------------------------ attribution
+
+  // renderBlame lists the element each metric was blamed on, from the report
+  // document. Only the full beacon sends attribution, so an empty table here is
+  // the normal state for a site running the small one, and the empty text says
+  // that rather than implying something failed.
+  function renderBlame(report) {
+    clear(el.blame);
+    el.blame.appendChild(h('caption', { class: 'visually-hidden', text: 'Element blamed per metric' }));
+
+    var rows = [];
+    report.metrics.forEach(function (m) {
+      (m.offenders || []).forEach(function (o) {
+        rows.push({ metric: m.metric, offender: o });
+      });
+    });
+
+    if (!rows.length) {
+      el.blame.appendChild(h('tbody', {}, [
+        h('tr', {}, [h('td', {
+          class: 'empty',
+          colspan: '4',
+          text: 'No attribution in this window. The small beacon at /b.js does not report it; ' +
+            'switch a page to /b-full.js to see which element is responsible.'
+        })])
+      ]));
+      renderNavigation(report);
+      return;
+    }
+
+    el.blame.appendChild(h('thead', {}, [h('tr', {}, [
+      h('th', { text: 'Metric' }),
+      h('th', { text: 'Element' }),
+      h('th', { text: 'Named' }),
+      h('th', { text: 'Rated poor' })
+    ])]));
+
+    var body = h('tbody', {});
+    rows.forEach(function (row) {
+      var meta = metricByKey[row.metric] || { label: row.metric };
+      var o = row.offender;
+
+      body.appendChild(h('tr', {}, [
+        h('td', { class: 'key', text: meta.label }),
+        // textContent, never innerHTML: the selector is a string the measured
+        // page chose, and it is the only field here that a hostile client
+        // controls end to end.
+        h('td', { class: 'key selector', text: o.selector }),
+        h('td', { class: 'num', text: o.samples.toLocaleString() }),
+        h('td', {
+          class: 'num' + (o.poor > 0 ? ' poor' : ''),
+          text: o.poor.toLocaleString()
+        })
+      ]));
+    });
+    el.blame.appendChild(body);
+
+    renderNavigation(report);
+  }
+
+  // renderNavigation shows how the page views in the window began. A site on
+  // the small beacon reports none, so the list is simply left empty.
+  function renderNavigation(report) {
+    clear(el.navigation);
+
+    (report.navigation || []).forEach(function (n) {
+      el.navigation.appendChild(h('div', {}, [
+        h('dt', { text: n.type.replace(/[-_]/g, ' ') }),
+        h('dd', { text: n.samples.toLocaleString() })
+      ]));
+    });
+  }
+
   // -------------------------------------------------------------- counters
 
   function renderCounters(data) {
@@ -563,6 +638,7 @@
 
     var items = [
       ['Accepted', data.ingest.accepted, false],
+      ['Duplicate', data.ingest.duplicate, false],
       ['Malformed', data.ingest.malformed, data.ingest.malformed > 0],
       ['Too large', data.ingest.tooLarge, data.ingest.tooLarge > 0],
       ['Store errors', data.ingest.storeErrors, data.ingest.storeErrors > 0],
@@ -962,7 +1038,12 @@
       getJSON('/api/summary?' + q),
       getJSON('/api/series?' + q + '&metric=' + metric + '&n=48'),
       getJSON('/api/routes?' + q + '&metric=' + metric),
-      getJSON('/api/devices?' + q + '&metric=' + metric)
+      getJSON('/api/devices?' + q + '&metric=' + metric),
+      // The report document is the only one carrying attribution. It is a
+      // fifth request rather than a sixth field on the summary because it is
+      // the same document the export already builds, so there is one place
+      // where a metric's offenders are computed.
+      fetchReport()
     ]).then(function (r) {
       renderScorecard(r[0]);
       renderCounters(r[0]);
@@ -973,6 +1054,7 @@
       // click from a different one rather than a trip through Clear filter.
       renderTable(el.routes, r[2], 'Route', 'No routes reported in this window.', setRoute);
       renderTable(el.devices, r[3], 'Device', 'No devices reported in this window.');
+      renderBlame(r[4]);
 
       var total = r[0].samples;
       setStatus(total.toLocaleString() + (total === 1 ? ' page view' : ' page views'));

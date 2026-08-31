@@ -40,10 +40,11 @@
 
 </main>
 <footer>
-  <p>Every page here loads <code>/b.js</code>, the 942-byte beacon, from this
-  same server. Measurements are sent once, when you leave the page or switch
-  tabs, so click through a few pages and then open the
-  <a href="/">dashboard</a>.</p>
+  <p>This page loads <code>/b.js</code>, the 942-byte beacon, from this same
+  server. The three broken pages load <code>/b-full.js</code> instead, which
+  also reports which element was responsible. Measurements are sent once, when
+  you leave the page or switch tabs, so click through a few pages and then open
+  the <a href="/">dashboard</a>.</p>
 </footer>
 <script>
 document.getElementById('ping').addEventListener('click', function (e) {

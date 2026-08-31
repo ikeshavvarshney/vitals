@@ -195,3 +195,172 @@ func TestReportRejectsBadWindow(t *testing.T) {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }
+
+// addFull appends a record shaped like one from the full beacon: with a
+// navigation type and an element blamed for each metric.
+func addFull(t *testing.T, s *store.Store, at time.Time, route, nav string,
+	values map[stats.Metric]float64, attr map[stats.Metric]string) {
+	t.Helper()
+
+	err := s.Append(store.Record{
+		At:      at,
+		Route:   route,
+		Session: "sess0001",
+		Width:   390,
+		Nav:     nav,
+		Attr:    attr,
+		Values:  values,
+	})
+	if err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+}
+
+// TestReportRanksOffendersByPoorSamples is the behaviour that makes the list
+// worth reading: the element named most often is usually the hero image, and it
+// only matters when the page views naming it were slow.
+func TestReportRanksOffendersByPoorSamples(t *testing.T) {
+	a := newTestAPI(t, func(s *store.Store) {
+		// Named four times, always fast. Common, and not the problem.
+		for i := 0; i < 4; i++ {
+			addFull(t, s, refNow.Add(-time.Duration(i+1)*time.Minute), "/", "navigate",
+				map[stats.Metric]float64{stats.LCP: 800},
+				map[stats.Metric]string{stats.LCP: "img.logo"})
+		}
+		// Named twice, poor both times. Rarer, and the thing to fix.
+		for i := 0; i < 2; i++ {
+			addFull(t, s, refNow.Add(-time.Duration(i+10)*time.Minute), "/", "navigate",
+				map[stats.Metric]float64{stats.LCP: 6000},
+				map[stats.Metric]string{stats.LCP: "img.hero"})
+		}
+	})
+
+	rep, err := a.BuildReport(ReportOptions{Window: time.Hour})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+
+	lcp := metricEntry(t, rep, stats.LCP)
+	if len(lcp.Offenders) != 2 {
+		t.Fatalf("got %d offenders, want 2: %+v", len(lcp.Offenders), lcp.Offenders)
+	}
+
+	top := lcp.Offenders[0]
+	if top.Selector != "img.hero" {
+		t.Errorf("top offender = %q, want img.hero", top.Selector)
+	}
+	if top.Samples != 2 || top.Poor != 2 {
+		t.Errorf("top offender = %d samples, %d poor; want 2 and 2", top.Samples, top.Poor)
+	}
+	if second := lcp.Offenders[1]; second.Selector != "img.logo" || second.Poor != 0 {
+		t.Errorf("second offender = %+v, want img.logo with 0 poor", second)
+	}
+}
+
+func TestReportOffendersAreEmptyWithoutAttribution(t *testing.T) {
+	a := newTestAPI(t, seedReport(t))
+
+	rep, err := a.BuildReport(ReportOptions{Window: time.Hour})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+
+	for _, m := range rep.Metrics {
+		if len(m.Offenders) != 0 {
+			t.Errorf("%s has offenders without any attribution stored: %+v", m.Metric, m.Offenders)
+		}
+	}
+	if len(rep.Navigation) != 0 {
+		t.Errorf("Navigation = %+v, want empty when no record carries a type", rep.Navigation)
+	}
+}
+
+func TestReportOffendersAreCapped(t *testing.T) {
+	a := newTestAPI(t, func(s *store.Store) {
+		for i := 0; i < breakdownLimit+4; i++ {
+			addFull(t, s, refNow.Add(-time.Duration(i+1)*time.Minute), "/", "navigate",
+				map[stats.Metric]float64{stats.LCP: 6000},
+				map[stats.Metric]string{stats.LCP: "div#slot-" + string(rune('a'+i))})
+		}
+	})
+
+	rep, err := a.BuildReport(ReportOptions{Window: time.Hour})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+
+	if got := len(metricEntry(t, rep, stats.LCP).Offenders); got != breakdownLimit {
+		t.Errorf("got %d offenders, want the cap of %d", got, breakdownLimit)
+	}
+}
+
+func TestReportCountsNavigationTypes(t *testing.T) {
+	a := newTestAPI(t, func(s *store.Store) {
+		kinds := []string{"navigate", "navigate", "navigate", "soft-navigation", "soft-navigation", "back-forward-cache"}
+		for i, kind := range kinds {
+			addFull(t, s, refNow.Add(-time.Duration(i+1)*time.Minute), "/", kind,
+				map[stats.Metric]float64{stats.LCP: 1000}, nil)
+		}
+	})
+
+	rep, err := a.BuildReport(ReportOptions{Window: time.Hour})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+
+	want := []NavigationCount{
+		{Type: "navigate", Samples: 3},
+		{Type: "soft-navigation", Samples: 2},
+		{Type: "back-forward-cache", Samples: 1},
+	}
+	if len(rep.Navigation) != len(want) {
+		t.Fatalf("got %+v, want %+v", rep.Navigation, want)
+	}
+	for i, w := range want {
+		if rep.Navigation[i] != w {
+			t.Errorf("Navigation[%d] = %+v, want %+v", i, rep.Navigation[i], w)
+		}
+	}
+}
+
+// TestReportOffendersCountOnlyTheirOwnMetric guards the obvious aggregation
+// mistake: blaming the LCP element for a bad CLS because both arrived on the
+// same record.
+func TestReportOffendersCountOnlyTheirOwnMetric(t *testing.T) {
+	a := newTestAPI(t, func(s *store.Store) {
+		addFull(t, s, refNow.Add(-time.Minute), "/", "navigate",
+			map[stats.Metric]float64{stats.LCP: 6000, stats.CLS: 0.4},
+			map[stats.Metric]string{stats.LCP: "img.hero", stats.CLS: "div#banner"})
+	})
+
+	rep, err := a.BuildReport(ReportOptions{Window: time.Hour})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+
+	for metric, want := range map[stats.Metric]string{stats.LCP: "img.hero", stats.CLS: "div#banner"} {
+		got := metricEntry(t, rep, metric).Offenders
+		if len(got) != 1 {
+			t.Fatalf("%s: got %d offenders, want 1: %+v", metric, len(got), got)
+		}
+		if got[0].Selector != want {
+			t.Errorf("%s: offender = %q, want %q", metric, got[0].Selector, want)
+		}
+	}
+	if got := metricEntry(t, rep, stats.INP).Offenders; len(got) != 0 {
+		t.Errorf("INP picked up an offender it was never given: %+v", got)
+	}
+}
+
+// metricEntry returns one metric's entry from a report.
+func metricEntry(t *testing.T, rep Report, m stats.Metric) ReportMetric {
+	t.Helper()
+
+	for _, entry := range rep.Metrics {
+		if entry.Metric == m {
+			return entry
+		}
+	}
+	t.Fatalf("report has no entry for %s", m)
+	return ReportMetric{}
+}

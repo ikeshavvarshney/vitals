@@ -63,23 +63,52 @@ type ReportMetric struct {
 	AbsoluteError float64    `json:"absoluteError"`
 	WorstRoutes   []GroupRow `json:"worstRoutes"`
 	WorstDevices  []GroupRow `json:"worstDevices"`
+	// Offenders names the elements the full beacon blamed for this metric,
+	// worst first. It is empty for a metric that carries no attribution, which
+	// is every metric collected by the small beacon.
+	Offenders []Offender `json:"offenders"`
+}
+
+// Offender is one element blamed for a metric, with how often it was named and
+// how often the page view that named it was rated poor.
+//
+// The selector is what the browser's element looked like at the moment the
+// measurement was taken: a tag, plus an id or the first class. It is not a
+// unique path, so two sibling elements that differ in nothing else are counted
+// together. That is the useful behaviour for an aggregate and a real limitation
+// for a page built out of one repeated component.
+type Offender struct {
+	Selector string `json:"selector"`
+	Samples  uint64 `json:"samples"`
+	Poor     uint64 `json:"poor"`
+}
+
+// NavigationCount is how many page views began a given way. Only the full
+// beacon reports a navigation type, so a site running the small beacon sees an
+// empty list rather than a wrong one.
+type NavigationCount struct {
+	Type    string `json:"type"`
+	Samples uint64 `json:"samples"`
 }
 
 // Report is every figure the dashboard shows, for all five metrics at once, in
 // one document that stands on its own. It is the payload of GET /api/report and
 // the document the terminal report prints, so the two cannot disagree.
 type Report struct {
-	Generated   time.Time        `json:"generated"`
-	From        time.Time        `json:"from"`
-	To          time.Time        `json:"to"`
-	WindowHours float64          `json:"windowHours"`
-	Percentile  float64          `json:"headlinePercentile"`
-	Route       string           `json:"route,omitempty"`
-	Samples     int              `json:"pageViews"`
-	Metrics     []ReportMetric   `json:"metrics"`
-	Ingest      ingest.Counters  `json:"ingest"`
-	Coverage    *coverageSummary `json:"coverage"`
-	BeaconBytes int              `json:"beaconBytes"`
+	Generated   time.Time       `json:"generated"`
+	From        time.Time       `json:"from"`
+	To          time.Time       `json:"to"`
+	WindowHours float64         `json:"windowHours"`
+	Percentile  float64         `json:"headlinePercentile"`
+	Route       string          `json:"route,omitempty"`
+	Samples     int             `json:"pageViews"`
+	Metrics     []ReportMetric  `json:"metrics"`
+	Ingest      ingest.Counters `json:"ingest"`
+	// Navigation is how the page views in this window began, most common
+	// first. Empty when no record carried a navigation type.
+	Navigation  []NavigationCount `json:"navigation"`
+	Coverage    *coverageSummary  `json:"coverage"`
+	BeaconBytes int               `json:"beaconBytes"`
 	// Caveats travel with the numbers. A report pasted somewhere else loses the
 	// footnotes printed on the dashboard, and these approximations are not safe
 	// to read without them.
@@ -100,11 +129,12 @@ var metricNames = map[stats.Metric]string{
 // they survive being copied out of the page.
 var reportCaveats = []string{
 	"Percentiles are approximate. Values are counted into fixed histogram buckets rather than sorted, so a quantile carries up to 4.9% relative error for millisecond metrics and 0.0025 absolute for CLS.",
-	"INP is approximated. It is the longest single event over 16ms in the page view, not the high percentile of interaction latency that real INP reports. It is pessimistic in the tail.",
+	"INP depends on which beacon reported it. The small beacon at /b.js sends the longest single event over 16ms, which is pessimistic in the tail; the full beacon at /b-full.js sends real INP, grouped by interaction. Both are stored under the same name and this window may mix them.",
 	"Band counts are exact. Every other figure except sample counts is bucketed.",
 	"Up to 2 seconds of samples are lost if the server is killed rather than shut down.",
 	"Device class is derived from viewport width, not from the user agent, so a narrow desktop window counts as mobile.",
-	"This is field data from real page views only. It is not a lab audit: there is no waterfall, no resource list, and no element attribution.",
+	"This is field data from real page views only. It is not a lab audit: there is no waterfall and no resource list.",
+	"Element attribution is best-effort and only from the full beacon. A selector is a tag plus an id or first class, not a unique path, so identical sibling elements are counted as one.",
 }
 
 // handleReport answers GET /api/report.
@@ -170,6 +200,7 @@ func (a *API) report(q query) Report {
 		Samples:     total,
 		Metrics:     agg.metrics(q.Percentile),
 		Ingest:      a.counters(),
+		Navigation:  agg.navigation(),
 		Coverage:    a.coverage(),
 		BeaconBytes: beacon.Size(),
 		Caveats:     reportCaveats,
@@ -184,6 +215,11 @@ type reportAggregator struct {
 	routes  map[stats.Metric]map[string]*stats.Histogram
 	devices map[stats.Metric]map[string]*stats.Histogram
 	bands   map[stats.Metric]*Distribution
+	// blamed counts element selectors per metric. Counts, not histograms: the
+	// question it answers is which element is named most often when this metric
+	// is bad, not what its distribution looks like.
+	blamed map[stats.Metric]map[string]*Offender
+	navs   map[string]uint64
 }
 
 func newReportAggregator() *reportAggregator {
@@ -192,18 +228,25 @@ func newReportAggregator() *reportAggregator {
 		routes:  make(map[stats.Metric]map[string]*stats.Histogram, len(stats.Metrics)),
 		devices: make(map[stats.Metric]map[string]*stats.Histogram, len(stats.Metrics)),
 		bands:   make(map[stats.Metric]*Distribution, len(stats.Metrics)),
+		blamed:  make(map[stats.Metric]map[string]*Offender, len(stats.Metrics)),
+		navs:    make(map[string]uint64),
 	}
 	for _, m := range stats.Metrics {
 		agg.overall[m] = stats.New(stats.LayoutOf(m))
 		agg.routes[m] = make(map[string]*stats.Histogram)
 		agg.devices[m] = make(map[string]*stats.Histogram)
 		agg.bands[m] = &Distribution{}
+		agg.blamed[m] = make(map[string]*Offender)
 	}
 	return agg
 }
 
 // add folds one record into every aggregate.
 func (agg *reportAggregator) add(rec store.Record) {
+	if rec.Nav != "" {
+		agg.navs[rec.Nav]++
+	}
+
 	for m, v := range rec.Values {
 		h, ok := agg.overall[m]
 		if !ok {
@@ -222,7 +265,71 @@ func (agg *reportAggregator) add(rec store.Record) {
 
 		groupFor(agg.routes[m], rec.Route, m).Add(v)
 		groupFor(agg.devices[m], string(rec.Device()), m).Add(v)
+
+		if sel := rec.Attr[m]; sel != "" {
+			blame := agg.blamed[m][sel]
+			if blame == nil {
+				blame = &Offender{Selector: sel}
+				agg.blamed[m][sel] = blame
+			}
+			blame.Samples++
+			if stats.BandOf(m, v) == stats.Poor {
+				blame.Poor++
+			}
+		}
 	}
+}
+
+// navigation renders the navigation-type tally, most common first.
+func (agg *reportAggregator) navigation() []NavigationCount {
+	if len(agg.navs) == 0 {
+		return nil
+	}
+
+	out := make([]NavigationCount, 0, len(agg.navs))
+	for kind, n := range agg.navs {
+		out = append(out, NavigationCount{Type: kind, Samples: n})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Samples != out[j].Samples {
+			return out[i].Samples > out[j].Samples
+		}
+		return out[i].Type < out[j].Type
+	})
+	return out
+}
+
+// topOffenders ranks blamed elements by how often they were named in a page
+// view rated poor, then by how often they were named at all.
+//
+// Ranking on the poor count rather than the raw count is what makes the list
+// worth reading: the element named on every page view is usually the hero
+// image, and it is only interesting when the pages it appears on are slow.
+func topOffenders(blamed map[string]*Offender) []Offender {
+	if len(blamed) == 0 {
+		return nil
+	}
+
+	rows := make([]Offender, 0, len(blamed))
+	for _, o := range blamed {
+		rows = append(rows, *o)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		a, b := rows[i], rows[j]
+		switch {
+		case a.Poor != b.Poor:
+			return a.Poor > b.Poor
+		case a.Samples != b.Samples:
+			return a.Samples > b.Samples
+		default:
+			return a.Selector < b.Selector
+		}
+	})
+
+	if len(rows) > breakdownLimit {
+		rows = rows[:breakdownLimit]
+	}
+	return rows
 }
 
 // groupFor returns the histogram for key, creating it on first use.
@@ -257,6 +364,7 @@ func (agg *reportAggregator) metrics(q float64) []ReportMetric {
 			AbsoluteError:    h.AbsoluteError(),
 			WorstRoutes:      topRows(agg.routes[m], m, q),
 			WorstDevices:     topRows(agg.devices[m], m, q),
+			Offenders:        topOffenders(agg.blamed[m]),
 		}
 
 		if h.Count() > 0 {

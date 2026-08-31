@@ -475,6 +475,12 @@ td.num {
   white-space: nowrap;
   font-weight: 600;
 }
+/* The blamed-element column. A selector can be long, so it wraps rather than
+   widening the table past the viewport, and the count of poor page views is
+   coloured only when it is not zero. */
+td.selector { width: 55%; color: var(--ink); }
+td.num.poor { color: var(--poor); }
+
 td.meter { width: 32%; min-width: 5rem; }
 .meter-bar { height: 4px; border-radius: 2px; background: var(--line-soft); overflow: hidden; }
 .meter-fill { height: 100%; border-radius: 2px; }

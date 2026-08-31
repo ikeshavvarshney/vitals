@@ -6,7 +6,7 @@
 <title>Heavy image | vitals demo</title>
 <link rel="stylesheet" href="/demo/demo.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#9679;</text></svg>">
-<script src="/b.js" defer></script>
+<script src="/b-full.js" defer></script>
 <script>
 // Occupy the main thread before anything paints, so this page is reliably
 // slow rather than dependent on the visitor's hardware.
@@ -53,10 +53,12 @@ while (Date.now() < blockUntil) { /* deliberately blocking */ }
 
 </main>
 <footer>
-  <p>Every page here loads <code>/b.js</code>, the 942-byte beacon, from this
-  same server. Measurements are sent once, when you leave the page or switch
-  tabs, so click through a few pages and then open the
-  <a href="/">dashboard</a>.</p>
+  <p>This page loads <code>/b-full.js</code>, the full beacon, from this same
+  server. It reports real INP and names the element responsible, which is why
+  this page shows up under <em>Blamed elements</em> on the dashboard. The fast
+  control page uses the 942-byte <code>/b.js</code> instead. Measurements are
+  sent once, when you leave the page or switch tabs, so click through a few
+  pages and then open the <a href="/">dashboard</a>.</p>
 </footer>
 </body>
 </html>

@@ -106,17 +106,59 @@ func printReport(out io.Writer, rep server.Report) {
 			strings.ToUpper(string(m.Metric)), truncate(w.Key, 40), pointer(w.Value, m.Unit), w.Samples)
 	}
 
+	// Attribution, when the full beacon is the one reporting. The slowest route
+	// says where to look; this says what to look at.
+	printOffenders(out, rep)
+	printNavigation(out, rep)
+
 	if c := rep.Coverage; c != nil {
 		fmt.Fprintf(out, "\nStorage  %d record(s) in %d day log(s), %s on disk, %.0f B per record\n",
 			c.Total, c.Files, formatBytes(c.Bytes), c.BytesPerRecord)
 	}
-	fmt.Fprintf(out, "Ingest   %d accepted, %d malformed, %d too large, %d store error(s)\n",
-		rep.Ingest.Accepted, rep.Ingest.Malformed, rep.Ingest.TooLarge, rep.Ingest.StoreErrors)
+	fmt.Fprintf(out, "Ingest   %d accepted, %d duplicate, %d malformed, %d too large, %d store error(s)\n",
+		rep.Ingest.Accepted, rep.Ingest.Duplicate, rep.Ingest.Malformed,
+		rep.Ingest.TooLarge, rep.Ingest.StoreErrors)
 
 	fmt.Fprintln(out, "\nThese figures are approximate. Percentiles are read off histogram")
 	fmt.Fprintln(out, "buckets: up to 4.9% relative error on millisecond metrics, 0.0025")
-	fmt.Fprintln(out, "absolute on CLS. Band counts are exact. INP is the longest event over")
-	fmt.Fprintln(out, "16ms, not real INP, and is pessimistic in the tail.")
+	fmt.Fprintln(out, "absolute on CLS. Band counts are exact. INP from the small beacon is")
+	fmt.Fprintln(out, "the longest event over 16ms and is pessimistic in the tail; INP from")
+	fmt.Fprintln(out, "the full beacon is the real, interaction-grouped figure.")
+}
+
+// printOffenders lists the element each metric was blamed on. Nothing is
+// printed when no record in the window carried attribution, which is the normal
+// case for a site running the small beacon: an empty heading would read as a
+// broken feature rather than an absent input.
+func printOffenders(out io.Writer, rep server.Report) {
+	shown := 0
+	for _, m := range rep.Metrics {
+		if len(m.Offenders) == 0 {
+			continue
+		}
+		if shown == 0 {
+			fmt.Fprintln(out, "\nElement most often blamed per metric")
+		}
+		shown++
+
+		o := m.Offenders[0]
+		fmt.Fprintf(out, "  %-6s %-40s named %d time(s), %d rated poor\n",
+			strings.ToUpper(string(m.Metric)), truncate(o.Selector, 40), o.Samples, o.Poor)
+	}
+}
+
+// printNavigation shows how the page views began. Only the full beacon reports
+// it, so like the offenders above it prints nothing rather than a heading over
+// an empty list.
+func printNavigation(out io.Writer, rep server.Report) {
+	if len(rep.Navigation) == 0 {
+		return
+	}
+
+	fmt.Fprintln(out, "\nPage views by navigation type")
+	for _, n := range rep.Navigation {
+		fmt.Fprintf(out, "  %-20s %d\n", n.Type, n.Samples)
+	}
 }
 
 // value renders one figure with its unit.

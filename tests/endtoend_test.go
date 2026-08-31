@@ -176,7 +176,9 @@ func TestDemoPagesLoadTheBeacon(t *testing.T) {
 		body := readBody(t, resp)
 		resp.Body.Close()
 
-		if !strings.Contains(body, `src="/b.js"`) {
+		// Either beacon counts here. Which page carries which is asserted in
+		// attribution_test.go; this test only cares that none is uninstrumented.
+		if !strings.Contains(body, `src="/b.js"`) && !strings.Contains(body, `src="/b-full.js"`) {
 			t.Errorf("%s does not load the beacon", page)
 		}
 		// Same-origin only. A CDN reference here would defeat the premise.
