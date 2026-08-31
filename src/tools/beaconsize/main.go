@@ -1,5 +1,5 @@
-// Command beaconsize reports the raw and gzipped size of the minified beacon
-// and fails when the raw size exceeds the budget.
+// Command beaconsize reports the raw and gzipped size of every beacon this
+// binary serves and fails when one exceeds its budget.
 //
 // The size claim is the central argument of this project, so it is enforced by
 // the build rather than asserted in a README that could drift.
@@ -15,22 +15,34 @@ import (
 )
 
 func main() {
-	raw := beacon.Size()
-
-	gzipped, err := gzipSize(beacon.Script())
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "beaconsize: %v\n", err)
-		os.Exit(2)
+	scripts := map[string][]byte{
+		beacon.Path:     beacon.Script(),
+		beacon.FullPath: beacon.FullScript(),
 	}
 
-	fmt.Printf("beacon.min.js  raw %4d B   gzip %4d B   budget %d B\n",
-		raw, gzipped, beacon.MaxBytes)
+	over := 0
+	for _, b := range beacon.Builds() {
+		gzipped, err := gzipSize(scripts[b.Path])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "beaconsize: %s: %v\n", b.Path, err)
+			os.Exit(2)
+		}
 
-	if raw > beacon.MaxBytes {
-		fmt.Fprintf(os.Stderr, "\nbeaconsize: over budget by %d bytes\n", raw-beacon.MaxBytes)
+		fmt.Printf("%-11s raw %4d B   gzip %4d B   budget %4d B   %s\n",
+			b.Path, b.Bytes, gzipped, b.MaxBytes, b.Summary)
+
+		if b.Bytes > b.MaxBytes {
+			fmt.Fprintf(os.Stderr, "beaconsize: %s is over budget by %d bytes\n",
+				b.Path, b.Bytes-b.MaxBytes)
+			over++
+			continue
+		}
+		fmt.Printf("%-11s within budget by %d B\n", "", b.MaxBytes-b.Bytes)
+	}
+
+	if over > 0 {
 		os.Exit(1)
 	}
-	fmt.Printf("within budget by %d B\n", beacon.MaxBytes-raw)
 }
 
 // gzipSize returns the length of b compressed at the best level.

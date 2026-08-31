@@ -177,6 +177,8 @@ func routes(db *store.Store) (http.Handler, *dash.API, error) {
 	}
 	mux.Handle("GET "+beacon.Path, beaconHandler)
 	mux.Handle("GET /beacon.src.js", beaconHandler)
+	mux.Handle("GET "+beacon.FullPath, beaconHandler)
+	mux.Handle("GET /beacon.full.src.js", beaconHandler)
 
 	demoHandler, err := demo.Handler()
 	if err != nil {
@@ -213,3 +215,12 @@ const BeaconMaxBytes = beacon.MaxBytes
 
 // BeaconBytes is the minified beacon's size in bytes.
 func BeaconBytes() int { return beacon.Size() }
+
+// FullBeaconPath is where the full-parity beacon is served.
+const FullBeaconPath = beacon.FullPath
+
+// FullBeaconMaxBytes is the size budget the full beacon is held to.
+const FullBeaconMaxBytes = beacon.MaxFullBytes
+
+// FullBeaconBytes is the minified full beacon's size in bytes.
+func FullBeaconBytes() int { return beacon.FullSize() }
