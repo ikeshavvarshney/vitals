@@ -154,36 +154,6 @@
     <dl class="counters" id="storage"></dl>
   </section>
 
-  <section aria-labelledby="snap-heading">
-    <div class="section-head">
-      <h2 id="snap-heading">Measure any page</h2>
-      <p class="section-note">A bookmarklet, for pages this instance does not serve</p>
-    </div>
-    <div class="panel snap">
-      <p class="snap-lead">
-        Drag this link to your bookmarks bar, open any site, and click it. The
-        page reports its vitals here, under a route named after its host.
-      </p>
-      <p><a class="snap-link" id="snap-link" href="#">vitals snapshot</a></p>
-      <ol class="snap-steps">
-        <li>Load the page you want to measure, then click the bookmarklet
-        <em>before</em> interacting with it, so its LCP is not already final.</li>
-        <li>Use the page as a visitor would, then press
-        <strong>Send to vitals</strong> in the panel that appears.</li>
-        <li>A tab opens here and records the measurement. Nothing is configured
-        and no cross-origin permission is involved: the payload travels in the
-        URL fragment, which browsers never send to a server.</li>
-      </ol>
-      <p class="snap-caveat">
-        Loading, layout, and paint numbers are the browser's own, replayed from
-        its buffer rather than re-measured. INP only sees interactions that
-        happen after the bookmarklet runs, so a missing INP means unmeasured,
-        not fast. This is one visit from your machine on your connection, which
-        is a sample of one and not the site's field data.
-      </p>
-    </div>
-  </section>
-
   <section aria-labelledby="export-heading">
     <div class="section-head">
       <h2 id="export-heading">Take the numbers elsewhere</h2>
@@ -211,6 +181,36 @@
         <p class="export-hint">If the clipboard is unavailable, the text appears
         here instead. Select it and copy manually.</p>
       </details>
+    </div>
+  </section>
+
+  <section aria-labelledby="snap-heading">
+    <div class="section-head">
+      <h2 id="snap-heading">Measure any page</h2>
+      <p class="section-note">A bookmarklet, for pages this instance does not serve</p>
+    </div>
+    <div class="panel snap">
+      <p class="snap-lead">
+        Drag this link to your bookmarks bar, open any site, and click it. The
+        page reports its vitals here, under a route named after its host.
+      </p>
+      <p><a class="snap-link" id="snap-link" href="#">vitals snapshot</a></p>
+      <ol class="snap-steps">
+        <li>Load the page you want to measure, then click the bookmarklet
+        <em>before</em> interacting with it, so its LCP is not already final.</li>
+        <li>Use the page as a visitor would, then press
+        <strong>Send to vitals</strong> in the panel that appears.</li>
+        <li>A tab opens here and records the measurement. Nothing is configured
+        and no cross-origin permission is involved: the payload travels in the
+        URL fragment, which browsers never send to a server.</li>
+      </ol>
+      <p class="snap-caveat">
+        Loading, layout, and paint numbers are the browser's own, replayed from
+        its buffer rather than re-measured. INP only sees interactions that
+        happen after the bookmarklet runs, so a missing INP means unmeasured,
+        not fast. This is one visit from your machine on your connection, which
+        is a sample of one and not the site's field data.
+      </p>
     </div>
   </section>
 
