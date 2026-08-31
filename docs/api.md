@@ -15,6 +15,7 @@ pagination.
 | `GET` | `/api/series` | One metric bucketed over time |
 | `GET` | `/api/routes` | One metric broken down by route |
 | `GET` | `/api/devices` | One metric broken down by device class |
+| `GET` | `/api/journeys` | One visitor's page sequence, most recently active first |
 | `GET` | `/api/report` | Every metric at once, with quantiles, band counts, and breakdowns |
 | `GET` | `/api/events` | Server-Sent Events: one notification per recorded measurement |
 | `GET` | `/b.js` | The minified beacon, 942 bytes |
@@ -70,10 +71,26 @@ fills the visitor's console while still losing the sample. Rejections are
 counted and surfaced in `/api/summary` instead. The only other status is `405`
 for a non-`POST` method.
 
+**Always responds `429 Too Many Requests`** when the source has spent its
+allowance, which is the one exception to the rule above. The check runs before
+the body is read, so a source over its limit costs one map lookup rather than a
+buffered read and a parse. Nothing in the beacon retries, so the status is for
+the operator and any proxy in front, not for the page.
+
+The limit is a token bucket per client address: **5 payloads per second with a
+burst of 40** by default, set with `-rate` and `-burst`, and disabled with a
+negative `-rate`. One page view produces one payload, so a real visitor spends
+burst rather than rate even with ten tabs open. Forwarded headers are ignored
+when identifying the source, for the same reason they are ignored for the
+session id: they are trivially spoofed. Behind a reverse proxy every visitor
+therefore shares one bucket, which is a documented limitation; run with a
+negative `-rate` and limit at the proxy instead.
+
 **Validation applied, in order:**
 
 | Rule | Limit | On breach |
 |---|---|---|
+| Rate, per source address | 5/s, burst 40 | `429`, counted as `rateLimited` |
 | Body size | 4096 bytes | Counted as `tooLarge` |
 | Well-formed payload | One JSON object | Counted as `malformed` |
 | Route present | Non-empty after sanitising | Counted as `malformed` |
@@ -179,7 +196,7 @@ pick up until the hour is out.
       "unit": "ms"
     }
   ],
-  "ingest": { "accepted": 1284, "duplicate": 2, "malformed": 3, "tooLarge": 0, "storeErrors": 0 },
+  "ingest": { "accepted": 1284, "duplicate": 2, "rateLimited": 0, "malformed": 3, "tooLarge": 0, "storeErrors": 0 },
   "compared": { "from": "2026-08-28T12:00:00Z", "to": "2026-08-29T12:00:00Z", "samples": 1190 },
   "coverage": { "total": 5012, "oldest": "2026-08-25T09:14:02Z", "newest": "2026-08-30T11:58:41Z" },
   "beaconBytes": 942
@@ -309,7 +326,7 @@ p90, and p95 whatever `p` asks for; `p` selects only which one `band` rates.
       ]
     }
   ],
-  "ingest": { "accepted": 1028, "duplicate": 2, "malformed": 0, "tooLarge": 0, "storeErrors": 0 },
+  "ingest": { "accepted": 1028, "duplicate": 2, "rateLimited": 0, "malformed": 0, "tooLarge": 0, "storeErrors": 0 },
   "navigation": [
     { "type": "navigate", "samples": 902 },
     { "type": "soft-navigation", "samples": 126 }
@@ -345,6 +362,80 @@ Notes on the fields that are not in the other endpoints:
   only by `/b-full.js`.
 - `caveats` restates the dashboard's footnotes inside the payload, so a report
   that travels somewhere else takes its disclosures with it.
+
+## 7a. `GET /api/journeys`
+
+One visitor's page views in the order they happened, most recently active
+visitor first.
+
+Every other endpoint reads across an aggregate and answers "how fast is this
+route". This one reads along a single visitor and answers "what did one person
+actually get, in order", which is a question a percentile cannot express. A p75
+of 2.4s says nothing about whether one visitor hit three progressively slower
+pages in a row; this says exactly that.
+
+Parameters: the shared `from`, `to` and `route`, plus `n` for how many visitors
+to return, 1 to 50, default 8. A `route` filter narrows each journey to that
+route and drops visitors who never reached it.
+
+```json
+{
+  "from": "2026-08-30T12:00:00Z",
+  "to": "2026-08-30T13:00:00Z",
+  "visitors": 42,
+  "limit": 8,
+  "journeys": [
+    {
+      "session": "6dc1a67e",
+      "steps": [
+        {
+          "t": "2026-08-30T12:04:11Z",
+          "route": "/",
+          "values": { "lcp": 900, "cls": 0.02 },
+          "bands": { "lcp": "good", "cls": "good" },
+          "worst": "good",
+          "device": "desktop"
+        },
+        {
+          "t": "2026-08-30T12:05:02Z",
+          "route": "/checkout",
+          "values": { "lcp": 8200 },
+          "bands": { "lcp": "poor" },
+          "worst": "poor",
+          "nav": "soft-navigation",
+          "device": "desktop"
+        }
+      ],
+      "pageViews": 2,
+      "truncated": false,
+      "durationSeconds": 51,
+      "worst": "poor",
+      "degraded": true
+    }
+  ],
+  "note": "A visitor identifier is a truncated hash of ..."
+}
+```
+
+- `session` is the coarse visitor identifier described under
+  [`docs/architecture.md`](architecture.md): a truncated hash of the request
+  origin, the user agent, and the current UTC date. It rotates at midnight UTC,
+  is never stored in a cookie, and cannot be linked to the same person on
+  another day. The `note` field carries that disclosure with the data, so a
+  response read anywhere else still carries it.
+- `degraded` is true when the last step is rated worse than the first. It is the
+  reason this endpoint exists.
+- `worst` on a step is the band of its worst-rated metric, and on a journey the
+  worst band it reached anywhere. A step that reported nothing rateable ranks
+  below `good` rather than above `poor`, so an empty page view never makes a
+  journey look worse than it was.
+- `steps` is capped at **25 per visitor**, oldest kept. `truncated` says so, and
+  `pageViews` remains the real count.
+- `visitors` counts every distinct visitor in the window, which is larger than
+  the number of journeys returned whenever `n` truncated the list.
+
+The same journeys appear in `GET /api/report`, but ranked worst first and cut to
+three, because a report is meant to be read in one screen.
 
 ## 8. `GET /api/events`
 

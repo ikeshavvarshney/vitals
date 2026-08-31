@@ -14,7 +14,7 @@ endif
 # nothing injects a timestamp or a git SHA. Those three facts are what make the
 # output byte-identical across rebuilds.
 
-.PHONY: all build run report test race check beacon compare proof repro clean
+.PHONY: all build run report test bench race check beacon compare proof repro clean
 
 all: build
 
@@ -33,6 +33,13 @@ report: build
 ## test: run the full test suite
 test:
 	go test ./...
+
+## bench: print the storage benchmarks
+#
+# The numbers published in docs/storage.md come from this target. They are the
+# evidence behind the scale limit stated there, which is otherwise an opinion.
+bench:
+	go test ./src/internal/store/ -bench . -benchmem -run '^$$'
 
 ## race: run the test suite under the race detector, inside Docker
 #

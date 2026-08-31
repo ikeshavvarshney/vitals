@@ -17,6 +17,18 @@ for.
   binding, none of which this binary has any use for. If the tool ever grew a
   real command tree, `flag` would start to hurt.
 
+- **`ory/dockertest` / `testcontainers-go` / a shell script around the binary**
+  → `tests/crash_test.go`, using `os/exec` and `net/http` from the standard
+  library. It builds the binary with `go build`, starts it as a child process on
+  a port reserved through `net.Listen`, posts real measurements over HTTP, kills
+  it with `Process.Kill`, and starts a second one on the same data directory.
+
+  This is how the durability claim is tested rather than asserted: a clean
+  `Close` proves nothing about what a `kill -9` costs. Where the packages are
+  better: they manage container lifecycles, networks, and cleanup across
+  platforms, and they would let the same test run against a server on another
+  machine. This runs one local process and knows nothing about containers.
+
 - **`jest` / `mocha` / `testify` / `gocheck`** → `testing` from the standard
   library, table-driven throughout. Go is unusual in shipping a test runner, so
   this avoids the development-dependency grey area entirely: there is no
@@ -139,15 +151,31 @@ for.
   cult. The `cors` package is genuinely necessary the moment an endpoint must
   return a readable response cross-origin, which this one deliberately does not.
 
-- **`express-rate-limit` / `helmet`** → not used, and this is a stated gap
-  rather than a substitution. The collection endpoint has no rate limiting: a
-  determined client can post as fast as the network allows and inflate the
-  numbers. The body cap, the metric plausibility bounds, and the 204-always
-  response limit the damage, but they are not a rate limiter. For a
-  self-hosted tool on a small site this is an accepted risk, not a solved
-  problem.
+- **`express-rate-limit` / `rate-limiter-flexible` / `golang.org/x/time/rate`**
+  → `internal/ingest.Limiter`, about 120 lines: a token bucket per client
+  address, refilled lazily.
 
-## HTTP serving
+  `golang.org/x/time/rate` is the obvious answer in Go and is explicitly banned
+  by the event rules, since `golang.org/x` is not the standard library. It is
+  also only half of what is needed here: it limits one bucket, and the thing to
+  bound is a map of buckets keyed by address, which is itself an unbounded
+  allocation if nobody thinks about it.
+
+  So the buckets are lazily refilled rather than driven by a timer, which means
+  an idle client costs one map entry and no goroutine; the table is capped at
+  8,192 sources and evicts the least recently seen; and a sweep drops anything
+  idle for ten minutes. The check runs before the request body is read, so a
+  client over its limit costs a map lookup rather than a parse.
+
+  Where theirs is better: `golang.org/x/time/rate` has a proper `Wait` with
+  context cancellation, reservation and cancellation semantics, and arithmetic
+  that has been reviewed far more carefully than this. `rate-limiter-flexible`
+  can share state across processes through Redis, which is what a real
+  multi-instance deployment needs and this cannot do at all.
+
+  The limit is per client address with forwarded headers ignored, so behind a
+  reverse proxy every visitor shares one bucket. That is a real limitation and
+  the answer is `-rate -1` plus a limit at the proxy.
 
 - **`express` + `serve-static`** → `internal/httpx.FileServer` over
   `net/http` and `io/fs`. Routing is `http.ServeMux`, which since Go 1.22

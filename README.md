@@ -129,7 +129,12 @@ Verified against real sites in Chrome 152. Other browsers are untested.
   back-forward cache, soft navigations, prerender correction, and element
   attribution
 - Names the element blamed for a bad LCP, layout shift, or interaction
-- Ingests over HTTP, stores on local disk, survives restart
+- **Visitor journeys**: one person's page views in order, so a visit that got
+  worse as it went is visible rather than averaged away
+- Ingests over HTTP, stores on local disk, survives a `kill -9` with at most two
+  seconds lost, proven by a test that kills a real process
+- Rate limited per source, because the collection endpoint is unauthenticated
+  and writes to disk
 - Dashboard with p50, p75, p90 or p95 per metric, banded good / needs
   improvement / poor
 - Each figure compared with the window immediately before it, so a regression
@@ -366,7 +371,22 @@ which is invisible in practice because a notification only means "re-read".
 **Storage is a single-node append log with an in-memory index.** No replication,
 no compaction, no query planner. At the scale this targets (one site), that is
 the right answer, not a compromise. It would not survive being pointed at a large
-site.
+site, and the limit has a number: replaying 100,000 records takes **593ms** and
+allocates 164MB, so a million records is roughly six seconds and 1.6GB to open.
+About 500ms of that 593 is `encoding/json` on the read path. The full table is in
+[`docs/storage.md`](docs/storage.md#2b-measured-cost).
+
+**A visitor identifier is not a person.** The journeys view follows one visitor
+through a session, which looks like tracking and is not: the identifier is a
+truncated hash of the request origin, the user agent, and the current UTC date.
+It rotates at midnight, is never stored in a cookie, and cannot be linked to the
+same person tomorrow or on another site. The consequence is that a journey never
+spans midnight UTC, and two visitors behind the same address with the same
+browser are counted as one.
+
+**The rate limit is per address, and a reverse proxy defeats it.** Forwarded
+headers are ignored because they are trivially spoofed, so behind a proxy every
+visitor shares one bucket. Run with `-rate -1` and limit at the proxy instead.
 
 **The binary segment format was planned and deliberately cut.** The design
 called for compacting old day logs into a hand-written binary format with a
@@ -423,6 +443,7 @@ requirement. The last column is what to run without it.
 | `make run` | Build and serve dashboard + demo on :8080 | `go run ./src/cmd/vitals` |
 | `make report` | Print the last 24 hours in the terminal | `go run ./src/cmd/vitals report -window 24h` |
 | `make test` | Run tests | `go test ./...` |
+| `make bench` | Print the storage benchmarks | `go test ./src/internal/store/ -bench . -benchmem -run '^$'` |
 | `make race` | Run tests under the race detector, via Docker | `go test -race ./...` |
 | `make check` | Fail on any dependency violation | `go run ./src/tools/check .` |
 | `make proof` | Regenerate `deps-proof.txt` | `go list -m all` |

@@ -147,6 +147,47 @@ The server enforces retention at startup and hourly thereafter when started with
 in its storage panel, so a missing day has a stated reason rather than looking
 like data loss.
 
+## 2b. Measured cost
+
+Every figure below comes from `go test ./src/internal/store/ -bench . -benchmem
+-run '^$'` on an Intel i5-6300U, Go 1.26, Windows. They are here because the
+scale limit further down is a claim, and a claim about performance without a
+number is an opinion.
+
+| Operation | Cost | Notes |
+|---|---|---|
+| Append, in order | **8.7 us** | Marshal, buffered write, index update. Never waits on disk |
+| Append, out of order | **66 us** | Worst case: inserted at the front of 5,000 records |
+| Full index rebuild | **0.7 to 1.0 ms** | What an out-of-order append used to cost, at the same size |
+| Scan a 100,000-record window | **1.19 ms** | Zero allocations |
+| Scan one route through the index | **49 us** | Zero allocations |
+| Scan one visitor's journey | **2.5 us** | Zero allocations |
+| Rank visitors by recency | **89 us** | Walks the session index, not the records |
+| Encode one record | **2.6 us** | `encoding/json`, 794 B |
+| Decode one record | **5.0 us** | 23 MB/s |
+| Replay 100,000 records | **593 ms** | 20 MB/s, 164 MB allocated |
+
+Three things follow from this table, and all three are load-bearing.
+
+**The append path is not quadratic, and it used to be.** An out-of-order arrival
+once rebuilt both secondary indexes, the millisecond row. That is not a rare path:
+the collector stamps a record with the wall clock and then takes the store lock
+separately, so two concurrent page views regularly land in the opposite order to
+their timestamps. Shifting the indexes instead is the 66 us row, and the gap
+between the two grows linearly with the number of records held.
+
+**Startup is the real scale limit, and decoding dominates it.** Replaying
+100,000 records takes 593 ms, and 100,000 decodes at 5.0 us each accounts for
+about 500 ms of that. So a directory of a million records takes roughly six
+seconds to open and allocates about 1.6 GB along the way. That is tolerable for
+one site and it is the number that says why: it is the cost of `encoding/json`
+on the read path, not of the index or the file layout.
+
+**It is also the case for the binary segment format that was cut.** A packed
+record with a fixed layout would not be parsed at all, only copied, which would
+remove essentially all of that 500 ms. That is the honest size of what cutting
+it gave up. See the end of this document.
+
 ## 3. Percentiles
 
 Percentiles are read off cumulative counts in a fixed-bucket histogram, not
