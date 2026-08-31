@@ -21,6 +21,23 @@ That is the whole manifest.
 
 **Zero Dependency Hackathon 2026, Track D (Data & Storage)**
 
+The visible surface is a dashboard, but the thing that was actually built is the
+storage engine under it. Measurements land in an append-only JSONL log that
+rotates on the UTC day boundary, with an in-memory index kept sorted by
+timestamp so a time range is a binary search rather than a scan, and log-spaced
+histograms that answer p75 without retaining a sample. Queries are served from
+the buffer before it reaches disk, the log replays on startup and skips
+corrupt lines rather than refusing to open, and retention drops whole day files
+because rewriting an append log is how you corrupt one.
+[`docs/storage.md`](docs/storage.md) states the durability and consistency
+guarantees and where they are cut: writes are buffered, so a crash loses up to
+2 seconds, and percentiles are bucketed to a 4.9% relative bound.
+`TestSurvivesRestart`, `TestConcurrentAppendAndQuery`, and
+`TestReplaySkipsCorruptLines` in
+[`src/internal/store/store_test.go`](src/internal/store/store_test.go) hold
+those claims up. This is the layer most analytics tools rent from Postgres or
+ClickHouse; here it is 600 lines of `os`, `bufio`, and `encoding/json`.
+
 ---
 
 ## Try it in two minutes
@@ -28,6 +45,12 @@ That is the whole manifest.
 ```bash
 git clone <repo> && cd vitals
 make run
+```
+
+No `make` on your machine? The Go toolchain alone is enough, on every platform:
+
+```bash
+go run ./src/cmd/vitals
 ```
 
 Open <http://localhost:8080/demo/> and click through a few pages. Then open
@@ -334,18 +357,26 @@ SVG. A database server and driver became an append log and a sorted slice.
 
 ## Build targets
 
-| Command | Does |
-|---|---|
-| `make` | Build the binary |
-| `make run` | Build and serve dashboard + demo on :8080 |
-| `make report` | Print the last 24 hours in the terminal |
-| `make test` | Run tests |
-| `make race` | Run tests under the race detector, via Docker |
-| `make check` | Fail on any dependency violation |
-| `make proof` | Regenerate `deps-proof.txt` |
-| `make repro` | Build twice, print both hashes |
-| `make beacon` | Print beacon size, enforce the 1KB budget |
-| `make compare` | Print beacon size beside another script for comparison |
+Every target wraps one Go command, so `make` is a convenience and never a
+requirement. The last column is what to run without it.
+
+| Command | Does | Without make |
+|---|---|---|
+| `make` | Build the binary | `go build -o vitals ./src/cmd/vitals` |
+| `make run` | Build and serve dashboard + demo on :8080 | `go run ./src/cmd/vitals` |
+| `make report` | Print the last 24 hours in the terminal | `go run ./src/cmd/vitals report -window 24h` |
+| `make test` | Run tests | `go test ./...` |
+| `make race` | Run tests under the race detector, via Docker | `go test -race ./...` |
+| `make check` | Fail on any dependency violation | `go run ./src/tools/check .` |
+| `make proof` | Regenerate `deps-proof.txt` | `go list -m all` |
+| `make repro` | Build twice, print both hashes | `go run ./src/tools/sha256sum <files>` |
+| `make beacon` | Print beacon size, enforce the 1KB budget | `go run ./src/tools/beaconsize` |
+| `make compare` | Print beacon size beside another script for comparison | `go run ./src/tools/compare <files>` |
+
+Verified on Windows with GNU Make 3.81 and on Linux with GNU Make 4.x. The only
+target that needs anything outside the Go toolchain is `make race`, which
+borrows Linux's C toolchain through Docker because the race detector needs an
+external linker; CI runs `go test -race` natively instead.
 
 ## License
 
