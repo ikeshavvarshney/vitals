@@ -55,7 +55,7 @@ type ReportMetric struct {
 	Mean             *float64           `json:"mean"`
 	Good             float64            `json:"good"`
 	NeedsImprovement float64            `json:"needsImprovement"`
-	Distribution     Distribution       `json:"Distribution"`
+	Distribution     Distribution       `json:"distribution"`
 	// RelativeError and AbsoluteError state the worst-case error of the
 	// quantiles above: a fraction of the value for millisecond metrics, an
 	// absolute score for CLS.

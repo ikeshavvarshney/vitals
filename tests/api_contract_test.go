@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -222,4 +223,74 @@ func TestBadParametersAreRejected(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestReportKeysAreLowerCamel walks every key in the report document and
+// requires it to begin with a lower-case letter.
+//
+// This exists because of a bug the rest of the suite could not see. The
+// distribution counts were tagged `json:"Distribution"` while the dashboard,
+// the documentation, and the test above all said `distribution`. Nothing in Go
+// noticed: encoding/json matches field names case-insensitively when decoding,
+// so a test that unmarshals into a struct passes against either spelling.
+// JavaScript does not, so the browser read undefined and the export button
+// failed with "Cannot read properties of undefined".
+//
+// Decoding into map[string]any is therefore the point. It is the only way to
+// assert the key a non-Go client actually receives.
+func TestReportKeysAreLowerCamel(t *testing.T) {
+	srv, _ := newServer(t)
+
+	seed(t, srv, "/", 1440, map[string]float64{
+		"lcp": 1800, "cls": 0.04, "inp": 120, "fcp": 900, "ttfb": 200,
+	})
+
+	var doc map[string]any
+	getJSON(t, srv.URL+"/api/report?from=24h", &doc)
+
+	var walk func(path string, v any)
+	walk = func(path string, v any) {
+		switch node := v.(type) {
+		case map[string]any:
+			for k, child := range node {
+				if k == "" {
+					t.Errorf("%s contains an empty key", path)
+					continue
+				}
+				if first := k[0]; first >= 'A' && first <= 'Z' {
+					t.Errorf("key %s%s starts upper-case; a JavaScript client "+
+						"reading the documented lower-case name gets undefined", path, k)
+				}
+				walk(path+k+".", child)
+			}
+		case []any:
+			for _, child := range node {
+				walk(path, child)
+			}
+		}
+	}
+	walk("", doc)
+
+	// The specific key that regressed, asserted by name so the failure names it.
+	metrics, ok := doc["metrics"].([]any)
+	if !ok || len(metrics) == 0 {
+		t.Fatal("report has no metrics array")
+	}
+	first, ok := metrics[0].(map[string]any)
+	if !ok {
+		t.Fatal("metrics[0] is not an object")
+	}
+	if _, ok := first["distribution"]; !ok {
+		t.Errorf("metrics[0] has no \"distribution\" key; got %v", keysOf(first))
+	}
+}
+
+// keysOf returns an object's keys, for a readable failure message.
+func keysOf(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

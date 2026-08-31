@@ -8,7 +8,7 @@ it with a browser sees the same behaviour.
 | File | Covers |
 |---|---|
 | `endtoend_test.go` | A beacon payload posted the way a browser posts it, read back through the API. Every route reachable, the demo pages instrumented, an unknown path 404, malformed payloads accepted without storing, a measurement surviving a restart, the served beacon inside its byte budget. |
-| `api_contract_test.go` | The JSON shapes consumers depend on: `value` rather than `p75`, null for an unreported metric, the comparison window, the percentile and route filter parameters, the report's caveats, and a `400` with a named parameter for anything unparseable. |
+| `api_contract_test.go` | The JSON shapes consumers depend on: `value` rather than `p75`, null for an unreported metric, the comparison window, the percentile and route filter parameters, the report's caveats, and a `400` with a named parameter for anything unparseable. Also that every key in the report document is lower-camel, walked over `map[string]any` rather than a struct, because `encoding/json` decodes field names case-insensitively and will match a key no JavaScript client can read. |
 | `assets_test.go` | The premise, checked against what is served rather than the source tree: no absolute URL, no web font, no CDN. Plus the caching policy, gzip, and that a conditional request answers `304` with an empty body. |
 | `live_test.go` | The Server-Sent Events stream: headers, the opening comment, a frame naming the route that was just recorded, and that ingestion keeps working after a stream client disconnects. |
 | `storage_test.go` | Disk usage reported from the files, and `-retain` removing an old day log from disk, from memory, and from the API while today's is untouched. |
